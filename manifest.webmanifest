@@ -1,0 +1,46 @@
+{
+  "name": "Surf Radar",
+  "short_name": "Surf Radar",
+  "description": "Les meilleurs créneaux de surf pour tes spots favoris.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#071f2c",
+  "theme_color": "#0b6f75",
+  "share_target": {
+    "action": "./?share=spot",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Voir les créneaux",
+      "url": "./#forecast"
+    },
+    {
+      "name": "Mes spots",
+      "url": "./#spots"
+    }
+  ]
+}
