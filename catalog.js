@@ -193,3 +193,15 @@ export function catalogSpot(catalogId, createId = () => crypto.randomUUID()) {
 export function personalStarterSpots(createId = () => crypto.randomUUID()) {
   return PERSONAL_STARTER_CATALOG_IDS.map((catalogId) => catalogSpot(catalogId, createId));
 }
+
+export function googleMapsDirectionsUrl(spot) {
+  const lat = Number(spot?.lat);
+  const lon = Number(spot?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
+  const parameters = new URLSearchParams({
+    api: "1",
+    destination: `${lat},${lon}`,
+    travelmode: "driving"
+  });
+  return `https://www.google.com/maps/dir/?${parameters}`;
+}

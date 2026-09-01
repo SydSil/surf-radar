@@ -6,7 +6,7 @@ import {
   findWindows
 } from "./scoring.js";
 import { exportBackup, importGoogleTakeout, parseBackup } from "./importers.js";
-import { catalogSpot, personalStarterSpots, SPOT_CATALOG } from "./catalog.js";
+import { catalogSpot, googleMapsDirectionsUrl, personalStarterSpots, SPOT_CATALOG } from "./catalog.js";
 import { matchCatalogSpot, parseShareTarget } from "./share-target.js";
 import { fetchJson, forecastUrls } from "./forecast.js";
 import { writeWorkerValue } from "./worker-store.js";
@@ -191,7 +191,7 @@ function windowCard(window) {
   const swellDirection = peak.swellDirection ?? peak.waveDirection;
   const confidenceClass = window.confidence.key === "high" ? "pill-good" : window.confidence.key === "medium" ? "pill-warning" : "";
   const reason = window.positives.length ? window.positives.slice(0, 3).join(" · ") : "Créneau cohérent avec tes réglages";
-  const mapsUrl = window.spot.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${window.spot.lat},${window.spot.lon}`;
+  const mapsUrl = googleMapsDirectionsUrl(window.spot);
   return `
     <article class="window-card">
       <div class="score-ring" style="--score:${window.score}"><span><strong>${window.score}</strong><small>pour toi</small></span></div>
@@ -210,7 +210,7 @@ function windowCard(window) {
         <span class="pill ${confidenceClass}">${escapeHtml(window.confidence.label)}</span>
         <small>${escapeHtml(window.confidence.detail)}</small>
         <div class="card-actions" style="margin-top:10px; justify-content:end">
-          <a class="button button-ghost button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer">Itinéraire</a>
+          <a class="button button-primary button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer" aria-label="S’y rendre à ${escapeHtml(window.spot.name)} avec Google Maps">S’y rendre</a>
         </div>
       </div>
     </article>`;
@@ -290,7 +290,7 @@ function directionLabel(key) {
 }
 
 function spotCard(spot) {
-  const mapsUrl = spot.googleMapsUrl || (Number.isFinite(spot.lat) && Number.isFinite(spot.lon) ? `https://www.google.com/maps/search/?api=1&query=${spot.lat},${spot.lon}` : "");
+  const mapsUrl = googleMapsDirectionsUrl(spot);
   return `
     <article class="spot-card ${spot.needsCoordinates ? "needs-coordinates" : ""}">
       <div class="spot-main">
@@ -305,7 +305,7 @@ function spotCard(spot) {
         ${spot.notes ? `<p class="spot-notes">${escapeHtml(spot.notes)}</p>` : ""}
       </div>
       <div class="spot-actions">
-        ${mapsUrl ? `<a class="button button-ghost button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>` : ""}
+        ${mapsUrl ? `<a class="button button-primary button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer" aria-label="S’y rendre à ${escapeHtml(spot.name)} avec Google Maps">S’y rendre</a>` : ""}
         ${spot.sourceUrl ? `<a class="button button-ghost button-small" href="${escapeHtml(spot.sourceUrl)}" target="_blank" rel="noreferrer">Référence</a>` : ""}
         <button class="button button-ghost button-small" data-action="edit-spot" data-id="${escapeHtml(spot.id)}">${spot.needsCoordinates ? "Compléter" : "Régler"}</button>
         <button class="button button-danger button-small" data-action="delete-spot" data-id="${escapeHtml(spot.id)}">Retirer</button>
