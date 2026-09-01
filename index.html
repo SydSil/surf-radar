@@ -3,36 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b6f75">
+  <meta name="theme-color" content="#f5fbfa">
   <meta name="description" content="Radar personnel de créneaux surf pour le Nord, la Belgique, les Pays-Bas et le Cotentin.">
   <title>Surf Radar</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="./vendor/phosphor/style.css">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
-
   <header class="topbar">
     <a class="brand" href="#forecast" aria-label="Accueil Surf Radar">
-      <img src="./icon.svg" alt="" width="42" height="42">
+      <img src="./assets/design/brand-mark.png" alt="" width="48" height="48">
       <span><strong>Surf Radar</strong><small>Les bonnes vagues, au bon moment</small></span>
     </a>
     <div class="top-actions">
       <span id="data-status" class="status-chip"><span class="status-dot"></span> Prêt</span>
       <button id="install-button" class="button button-ghost hidden" type="button">Installer</button>
-      <button id="refresh-button" class="button button-primary" type="button">Actualiser</button>
+      <button id="refresh-button" class="button button-primary refresh-button" type="button"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>Actualiser</span></button>
     </div>
   </header>
 
   <main class="shell">
     <nav class="side-nav" aria-label="Navigation principale">
-      <a href="#forecast" data-route="forecast" class="nav-link active"><span>⌁</span> Prévisions</a>
-      <a href="#spots" data-route="spots" class="nav-link"><span>◎</span> Mes spots</a>
-      <a href="#profile" data-route="profile" class="nav-link"><span>◐</span> Mon profil</a>
-      <a href="#about" data-route="about" class="nav-link"><span>ⓘ</span> Comprendre</a>
+      <a href="#forecast" data-route="forecast" class="nav-link active"><i class="ph ph-crosshair" aria-hidden="true"></i> Prévisions</a>
+      <a href="#spots" data-route="spots" class="nav-link"><i class="ph ph-map-pin" aria-hidden="true"></i> Mes spots</a>
+      <a href="#profile" data-route="profile" class="nav-link"><i class="ph ph-user-circle" aria-hidden="true"></i> Mon profil</a>
+      <a href="#about" data-route="about" class="nav-link"><i class="ph ph-info" aria-hidden="true"></i> Comprendre</a>
       <div class="nav-note">
         <strong>Profil actuel</strong>
         <span>Débutant autonome</span>
@@ -40,21 +38,21 @@
       </div>
     </nav>
 
-    <section id="app" class="content" aria-live="polite"></section>
+    <section id="app" class="content"></section>
   </main>
 
   <nav class="bottom-nav" aria-label="Navigation mobile">
-    <a href="#forecast" data-route="forecast" class="nav-link active"><span>⌁</span><small>Radar</small></a>
-    <a href="#spots" data-route="spots" class="nav-link"><span>◎</span><small>Spots</small></a>
-    <a href="#profile" data-route="profile" class="nav-link"><span>◐</span><small>Profil</small></a>
-    <a href="#about" data-route="about" class="nav-link"><span>ⓘ</span><small>À propos</small></a>
+    <a href="#forecast" data-route="forecast" class="nav-link active"><i class="ph ph-crosshair" aria-hidden="true"></i><small>Radar</small></a>
+    <a href="#spots" data-route="spots" class="nav-link"><i class="ph ph-map-pin" aria-hidden="true"></i><small>Spots</small></a>
+    <a href="#profile" data-route="profile" class="nav-link"><i class="ph ph-user-circle" aria-hidden="true"></i><small>Profil</small></a>
+    <a href="#about" data-route="about" class="nav-link"><i class="ph ph-info" aria-hidden="true"></i><small>À propos</small></a>
   </nav>
 
   <dialog id="spot-dialog" class="dialog">
     <form id="spot-form" method="dialog">
       <div class="dialog-head">
         <div><p class="eyebrow">Favori</p><h2 id="spot-dialog-title">Ajouter un spot</h2></div>
-        <button class="icon-button" value="cancel" aria-label="Fermer" type="submit">×</button>
+        <button class="icon-button" data-action="close-spot" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
       </div>
       <input id="spot-id" name="id" type="hidden">
       <input name="lat" type="hidden">
@@ -91,7 +89,7 @@
       </div>
       <p class="form-hint">Aucune coordonnée à saisir : la recherche et la carte s’en chargent. Cartographie © OpenStreetMap.</p>
       <div class="dialog-actions">
-        <button class="button button-ghost" value="cancel" type="submit">Annuler</button>
+        <button class="button button-ghost" data-action="close-spot" type="button">Annuler</button>
         <button class="button button-primary" id="save-spot-button" value="default" type="submit">Enregistrer</button>
       </div>
     </form>
@@ -101,7 +99,7 @@
     <div class="catalog-dialog-body">
       <div class="dialog-head">
         <div><p class="eyebrow">Sélection de départ</p><h2>Spots connus autour de Laon</h2><p>Un appui suffit. Les réglages sont prudents pour ton mini-malibu et restent modifiables.</p></div>
-        <button class="icon-button" data-action="close-catalog" aria-label="Fermer" type="button">×</button>
+        <button class="icon-button" data-action="close-catalog" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
       </div>
       <div id="catalog-list" class="catalog-list"></div>
     </div>

@@ -1,7 +1,7 @@
 import { backgroundNotification, evaluateStateForecast } from "./forecast.js";
 import { readWorkerValue, writeWorkerValue } from "./worker-store.js";
 
-const CACHE_NAME = "surf-radar-shell-v7";
+const CACHE_NAME = "surf-radar-shell-v8";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -18,8 +18,12 @@ const APP_SHELL = [
   "./vendor/leaflet/images/marker-icon.png",
   "./vendor/leaflet/images/marker-icon-2x.png",
   "./vendor/leaflet/images/marker-shadow.png",
+  "./vendor/phosphor/style.css",
+  "./vendor/phosphor/Phosphor.woff2",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./assets/design/header-ambient.png",
+  "./assets/design/brand-mark.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png"
 ];

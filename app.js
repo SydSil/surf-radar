@@ -148,6 +148,7 @@ function render() {
 
 const routeDate = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 const routeTime = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const headlineDate = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
 function formatWindowTime(window) {
   const startDate = new Date(window.start.timestamp);
@@ -181,7 +182,36 @@ function allWindows() {
 function travelLabel(spot) {
   if (!spot.travelHours) return "";
   const easy = Number(spot.travelHours) <= Number(state.profile.maxDriveHours || 5);
-  return `${spot.travelHours} h aller · ${easy ? "décision la veille" : "escapade"}`;
+  return `${formatTravelHours(spot.travelHours)} aller · ${easy ? "décision la veille" : "escapade"}`;
+}
+
+function formatTravelHours(hours) {
+  const value = Number(hours);
+  if (!Number.isFinite(value)) return "";
+  const wholeHours = Math.floor(value);
+  const minutes = Math.round((value - wholeHours) * 60);
+  return `${wholeHours} h${minutes ? ` ${minutes}` : ""}`;
+}
+
+function routeButton(spot, className = "button button-primary") {
+  const mapsUrl = googleMapsDirectionsUrl(spot);
+  if (!mapsUrl) return "";
+  return `<a class="${className}" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer" aria-label="S’y rendre à ${escapeHtml(spot.name)} avec Google Maps"><i class="ph ph-navigation-arrow" aria-hidden="true"></i><span>S’y rendre</span></a>`;
+}
+
+function readableNearMissReason(slot) {
+  if (slot.cautions?.length) return slot.cautions[0];
+  const labels = {
+    height: "taille encore un peu éloignée de ta zone idéale",
+    wind: "vent à surveiller",
+    period: "houle encore peu organisée",
+    direction: "orientation moins favorable",
+    tide: "niveau marin moins favorable"
+  };
+  const weakest = Object.entries(slot.components || {})
+    .filter(([key]) => key !== "daylight")
+    .sort((a, b) => a[1] - b[1])[0]?.[0];
+  return labels[weakest] || "conditions encore un peu irrégulières";
 }
 
 function windowCard(window) {
@@ -190,11 +220,9 @@ function windowCard(window) {
   const swellPeriod = peak.swellPeriod ?? peak.wavePeriod;
   const swellDirection = peak.swellDirection ?? peak.waveDirection;
   const confidenceClass = window.confidence.key === "high" ? "pill-good" : window.confidence.key === "medium" ? "pill-warning" : "";
-  const reason = window.positives.length ? window.positives.slice(0, 3).join(" · ") : "Créneau cohérent avec tes réglages";
-  const mapsUrl = googleMapsDirectionsUrl(window.spot);
+  const reason = window.positives[0] || "Créneau cohérent avec tes réglages";
   return `
     <article class="window-card">
-      <div class="score-ring" style="--score:${window.score}"><span><strong>${window.score}</strong><small>pour toi</small></span></div>
       <div class="window-main">
         <h3>${escapeHtml(window.spot.name)}</h3>
         <div class="window-date">${escapeHtml(formatWindowTime(window))}</div>
@@ -204,14 +232,11 @@ function windowCard(window) {
           <span>Vent ${Number(peak.windSpeed ?? 0).toFixed(0)} km/h · ${cardinalFromDegrees(peak.windDirection)}</span>
           <span>${escapeHtml(tideLabel(peak))}</span>
         </div>
-        <p class="window-reason">${escapeHtml(reason)}. <strong>${escapeHtml(peak.label)}</strong></p>
+        <p class="window-reason">${escapeHtml(reason)}.</p>
       </div>
-      <div class="confidence">
+      <div class="window-actions">
         <span class="pill ${confidenceClass}">${escapeHtml(window.confidence.label)}</span>
-        <small>${escapeHtml(window.confidence.detail)}</small>
-        <div class="card-actions" style="margin-top:10px; justify-content:end">
-          <a class="button button-primary button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer" aria-label="S’y rendre à ${escapeHtml(window.spot.name)} avec Google Maps">S’y rendre</a>
-        </div>
+        ${routeButton(window.spot, "route-link")}
       </div>
     </article>`;
 }
@@ -225,20 +250,55 @@ function nearMisses() {
   }).filter(Boolean).sort((a, b) => b.slot.score - a.slot.score).slice(0, 4);
 }
 
+function nearMissCard({ spot, slot }) {
+  const swellHeight = slot.swellHeight ?? slot.waveHeight;
+  const mapsUrl = googleMapsDirectionsUrl(spot);
+  return `
+    <article class="window-card near-miss-card">
+      <div class="window-main">
+        <h3>${escapeHtml(spot.name)}</h3>
+        <div class="window-date">${escapeHtml(relativeDay(slot.timestamp))} · ${escapeHtml(routeTime.format(new Date(slot.timestamp)))}</div>
+        <div class="condition-row">
+          ${spot.travelHours ? `<span>${escapeHtml(spot.travelHours)} h aller</span>` : ""}
+          ${Number.isFinite(Number(swellHeight)) ? `<span>Houle ${Number(swellHeight).toFixed(1)} m</span>` : ""}
+          ${Number.isFinite(Number(slot.windSpeed)) ? `<span>Vent ${Number(slot.windSpeed).toFixed(0)} km/h</span>` : ""}
+        </div>
+        <p class="window-reason">${escapeHtml(readableNearMissReason(slot))}.</p>
+      </div>
+      <div class="window-actions">
+        <span class="pill">À surveiller</span>
+        ${mapsUrl ? routeButton(spot, "route-link") : ""}
+      </div>
+    </article>`;
+}
+
+function routeOnlyCard(spot) {
+  return `
+    <article class="window-card route-only-card">
+      <div class="window-main">
+        <h3>${escapeHtml(spot.name)}</h3>
+        <div class="window-date">Prévision en cours</div>
+        <p class="window-reason">Tu peux déjà préparer le trajet pendant la mise à jour des conditions.</p>
+      </div>
+      <div class="window-actions">${routeButton(spot, "route-link")}</div>
+    </article>`;
+}
+
 function renderForecast() {
   const enabledSpots = state.spots.filter((spot) => spot.enabled && !spot.needsCoordinates);
   const windows = allWindows();
   const next = windows[0];
+  const misses = nearMisses();
   let hero;
 
   if (!enabledSpots.length) {
     hero = `
       <section class="hero">
-        <p class="eyebrow">Depuis ${escapeHtml(state.profile.homeName)}</p>
-        <h1>Choisis tes plages. Le radar s’occupe du reste.</h1>
-        <p>Commence avec un spot connu ou cherche simplement un nom sur la carte. Aucune coordonnée à saisir.</p>
+        <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
+        <h1>Ta prochaine session</h1>
+        <p class="hero-intro">Choisis tes plages favorites. Le radar s’occupe ensuite de trouver le bon moment.</p>
         <div class="hero-actions">
-          <button class="button button-primary" data-action="open-catalog">Choisir un spot connu</button>
+          <button class="button button-primary" data-action="open-catalog"><i class="ph ph-map-pin-plus" aria-hidden="true"></i>Choisir un spot connu</button>
           <button class="button button-ghost" data-action="add-spot">Rechercher sur la carte</button>
         </div>
       </section>`;
@@ -247,42 +307,48 @@ function renderForecast() {
     const swellHeight = peak.swellHeight ?? peak.waveHeight;
     hero = `
       <section class="hero">
-        <p class="eyebrow">Prochaine fenêtre · ${escapeHtml(relativeDay(next.start.timestamp))}</p>
-        <h1>${escapeHtml(next.spot.name)} pourrait bien valoir le trajet.</h1>
-        <p>${escapeHtml(formatWindowTime(next))}. La prévision correspond à ton mini-malibu et à ta plage de confort, sous réserve d’une vérification locale avant la mise à l’eau.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="#window-${escapeHtml(next.id)}">Voir le créneau</a>
-          <button class="button button-ghost" data-action="refresh">Mettre à jour les modèles</button>
-        </div>
-        <div class="metrics-grid">
-          <div class="metric"><span>Score personnel</span><strong>${next.score}/100</strong></div>
-          <div class="metric"><span>Houle au large</span><strong>${Number(swellHeight).toFixed(1)} m · ${Number(peak.swellPeriod ?? peak.wavePeriod).toFixed(0)} s</strong></div>
-          <div class="metric"><span>Confiance</span><strong>${escapeHtml(next.confidence.label)}</strong></div>
+        <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
+        <h1>Ta prochaine session</h1>
+        <p class="hero-intro">Une recommandation simple pour ton niveau et les conditions.</p>
+        <div class="primary-session">
+          <p class="session-date">${escapeHtml(relativeDay(next.start.timestamp))} · ${escapeHtml(routeTime.format(new Date(next.start.timestamp)))}–${escapeHtml(routeTime.format(new Date(next.end.timestamp + 60 * 60 * 1000)))}</p>
+          <h2>${escapeHtml(next.spot.name)}</h2>
+          ${next.spot.travelHours ? `<p class="travel-time"><i class="ph ph-clock" aria-hidden="true"></i>${escapeHtml(formatTravelHours(next.spot.travelHours))} aller</p>` : ""}
+          <p class="session-verdict"><i class="ph ph-waves" aria-hidden="true"></i>Doux et propre pour ton niveau</p>
+          <div class="session-conditions">
+            <div><i class="ph ph-waves" aria-hidden="true"></i><strong>${Number(swellHeight).toFixed(1)} m</strong><span>Houle</span></div>
+            <div><i class="ph ph-wind" aria-hidden="true"></i><strong>${Number(peak.windSpeed ?? 0).toFixed(0)} km/h</strong><span>Vent</span></div>
+            <div><i class="ph ph-compass" aria-hidden="true"></i><strong>${cardinalFromDegrees(peak.swellDirection ?? peak.waveDirection)}</strong><span>Direction</span></div>
+            <div><i class="ph ph-wave-sine" aria-hidden="true"></i><strong>${peak.tideTrend === "rising" ? "Montante" : peak.tideTrend === "falling" ? "Descendante" : "À vérifier"}</strong><span>Niveau marin</span></div>
+          </div>
+          ${routeButton(next.spot, "button button-primary hero-route")}
         </div>
       </section>`;
   } else {
     const loaded = runtime.size > 0;
     hero = `
       <section class="hero">
-        <p class="eyebrow">${enabledSpots.length} spot${enabledSpots.length > 1 ? "s" : ""} surveillé${enabledSpots.length > 1 ? "s" : ""}</p>
-        <h1>${loaded ? "Pas encore de feu vert franc." : "Lecture des modèles en cours…"}</h1>
-        <p>${loaded ? "Aucun créneau de deux heures ne dépasse ton seuil actuel. Le radar continuera de comparer la houle, le vent et la marée." : "Les premières prévisions vont apparaître ici dans quelques secondes."}</p>
-        <div class="hero-actions"><button class="button button-primary" data-action="refresh">Actualiser maintenant</button><a class="button button-ghost" href="#spots">Vérifier mes spots</a></div>
+        <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
+        <h1>Ta prochaine session</h1>
+        <p class="hero-intro">${loaded ? "Pas encore de feu vert franc. Voici les meilleurs spots à surveiller." : "Lecture des conditions pour tes spots favoris…"}</p>
+        <div class="hero-actions"><button class="button button-primary" data-action="refresh"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Actualiser</button><a class="button button-ghost" href="#spots">Gérer mes spots</a></div>
       </section>`;
   }
 
-  const windowsHtml = windows.length
-    ? `<div class="window-list">${windows.slice(0, 10).map((window) => `<div id="window-${escapeHtml(window.id)}">${windowCard(window)}</div>`).join("")}</div>`
-    : nearMisses().length
-      ? `<div class="window-list">${nearMisses().map(({ spot, slot }) => `
-          <article class="window-card">
-            <div class="score-ring" style="--score:${slot.score}"><span><strong>${slot.score}</strong><small>presque</small></span></div>
-            <div class="window-main"><h3>${escapeHtml(spot.name)}</h3><div class="window-date">Meilleur créneau sous le seuil : ${escapeHtml(routeDate.format(new Date(slot.timestamp)))} à ${escapeHtml(routeTime.format(new Date(slot.timestamp)))}</div><p class="window-reason">Il manque encore un peu d’accord entre la taille, le vent et la période.</p></div>
-            <div class="confidence"><span class="pill">À surveiller</span></div>
-          </article>`).join("")}</div>`
-      : `<section class="panel empty-state"><div class="empty-symbol">⌁</div><h2>Aucun créneau calculé</h2><p>Choisis un spot connu, recherche une plage ou relance la mise à jour.</p></section>`;
+  const windowSpotIds = new Set(windows.map((window) => window.spot.id));
+  const additionalWindows = next ? windows.slice(1, 10) : windows.slice(0, 10);
+  const additionalMisses = misses.filter(({ spot }) => !windowSpotIds.has(spot.id)).slice(0, Math.max(0, 4 - additionalWindows.length));
+  const rows = [
+    ...additionalWindows.map((window) => `<div id="window-${escapeHtml(window.id)}">${windowCard(window)}</div>`),
+    ...additionalMisses.map(nearMissCard)
+  ];
+  const fallbackRows = !rows.length && !next ? misses.map(nearMissCard) : rows;
+  const visibleRows = fallbackRows.length ? fallbackRows : enabledSpots.slice(0, 4).map(routeOnlyCard);
+  const windowsHtml = visibleRows.length
+    ? `<div class="window-list">${visibleRows.join("")}</div>`
+    : `<section class="panel empty-state"><i class="ph ph-waves" aria-hidden="true"></i><h2>Aucun spot surveillé</h2><p>Choisis un spot connu ou recherche simplement une plage par son nom.</p></section>`;
 
-  app.innerHTML = `<div class="view">${hero}<div class="section-title"><div><h2>Les fenêtres à venir</h2><p>Deux heures consécutives minimum, classées chronologiquement.</p></div><span class="pill">Seuil ${state.profile.alertThreshold}/100</span></div>${windowsHtml}</div>`;
+  app.innerHTML = `<div class="view forecast-view">${hero}<div class="section-title"><div><h2>${next ? "Autres spots à surveiller" : "Spots à surveiller"}</h2><p>Les meilleures possibilités parmi tes favoris.</p></div></div>${windowsHtml}<a class="text-link all-spots-link" href="#spots">Voir tous les spots</a><p class="safety-note"><i class="ph ph-shield-check" aria-hidden="true"></i> Vérifie toujours les conditions sur place avant la mise à l’eau.</p></div>`;
 }
 
 function directionLabel(key) {
@@ -327,7 +393,7 @@ function renderSpots() {
       </section>
       ${unresolved ? `<div class="callout"><strong>${unresolved} spot${unresolved > 1 ? "s" : ""} importé${unresolved > 1 ? "s" : ""} à retrouver.</strong> Appuie sur « Compléter », recherche simplement son nom, puis choisis le résultat sur la carte.</div>` : ""}
       <div class="section-title"><div><h2>${state.spots.length} spot${state.spots.length > 1 ? "s" : ""}</h2><p>Catalogue, recherche cartographique ou import Google.</p></div><div class="toolbar"><button class="button button-ghost button-small" data-action="export-backup">Sauvegarder</button><button class="button button-ghost button-small" data-action="import-backup">Restaurer</button></div></div>
-      ${state.spots.length ? `<div class="spot-list">${state.spots.map(spotCard).join("")}</div>` : `<section class="panel empty-state"><div class="empty-symbol">◎</div><h2>Ta liste est encore vide</h2><p>Le plus simple : choisis une plage connue. Pour un autre lieu, tape son nom ou son adresse et sélectionne-le sur la carte.</p><div class="hero-actions" style="justify-content:center"><button class="button button-primary" data-action="open-catalog">Voir les spots connus</button><button class="button button-ghost" data-action="add-spot">Rechercher un lieu</button></div><p class="secondary-help">Ta liste Google Maps reste importable quand tu le souhaites.</p></section>`}
+      ${state.spots.length ? `<div class="spot-list">${state.spots.map(spotCard).join("")}</div>` : `<section class="panel empty-state"><i class="ph ph-map-pin" aria-hidden="true"></i><h2>Ta liste est encore vide</h2><p>Le plus simple : choisis une plage connue. Pour un autre lieu, tape son nom ou son adresse et sélectionne-le sur la carte.</p><div class="hero-actions"><button class="button button-primary" data-action="open-catalog">Voir les spots connus</button><button class="button button-ghost" data-action="add-spot">Rechercher un lieu</button></div><p class="secondary-help">Ta liste Google Maps reste importable quand tu le souhaites.</p></section>`}
     </div>`;
 }
 
@@ -337,7 +403,7 @@ function renderProfile() {
     <div class="view">
       <div class="page-head"><div><p class="eyebrow">Personnalisation</p><h1>Ton surf, pas une note générique</h1><p>Le moteur est volontairement conservateur : take-off acquis, premières directions et remise dans l’axe, sur une planche très permissive.</p></div></div>
       <div class="profile-summary">
-        <section class="panel board-card"><h2>Débutant autonome</h2><p>Take-off régulier · premières trajectoires · priorité aux vagues formées mais raisonnables.</p><div class="board-visual"><div class="board-shape"></div></div></section>
+        <section class="panel profile-card"><p class="eyebrow">Profil actuel</p><h2>Débutant autonome</h2><p>Take-off régulier · premières trajectoires · priorité aux vagues formées mais raisonnables.</p><div class="profile-facts"><span><i class="ph ph-waves" aria-hidden="true"></i>Mini-malibu 7'3</span><span><i class="ph ph-shield-check" aria-hidden="true"></i>Réglages prudents</span></div></section>
         <section class="panel"><h2>Mes préférences</h2><form id="profile-form" class="form-grid">
           <label class="field field-wide">Point de départ<input name="homeName" value="${escapeHtml(profile.homeName)}"></label>
           <label class="field">Trajet facile sur décision la veille (h aller)<input name="maxDriveHours" type="number" min="1" max="12" step="0.5" value="${escapeHtml(profile.maxDriveHours)}"></label>
@@ -520,7 +586,6 @@ function openSpotDialog(id = null, draft = null) {
 }
 
 spotForm.addEventListener("submit", (event) => {
-  if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   const form = new FormData(spotForm);
   const id = form.get("id") || crypto.randomUUID();
@@ -569,6 +634,7 @@ document.addEventListener("click", async (event) => {
   if (!target) return;
   const { action, id } = target.dataset;
   if (action === "add-spot") openSpotDialog();
+  if (action === "close-spot" && spotDialog.open) spotDialog.close();
   if (action === "edit-spot") openSpotDialog(id);
   if (action === "open-catalog") openCatalogDialog();
   if (action === "close-catalog") catalogDialog.close();

@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#071f2c",
-  "theme_color": "#0b6f75",
+  "background_color": "#fbfdfc",
+  "theme_color": "#f5fbfa",
   "share_target": {
     "action": "./?share=spot",
     "method": "GET",

@@ -10,6 +10,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@phosphor-icons/web": "^2.1.1",
     "leaflet": "^1.9.4"
   }
 }
