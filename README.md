@@ -2,6 +2,12 @@
 
 PWA personnelle à 0 € pour repérer les fenêtres de surf adaptées à un débutant autonome en mini-malibu, depuis Laon vers le Nord de la France, la Belgique, les Pays-Bas et le Cotentin.
 
+## Application en ligne
+
+[Ouvrir Surf Radar](https://sydsil.github.io/surf-radar/)
+
+L’application est publiée gratuitement avec GitHub Pages et peut être installée depuis Chrome sur Android ou depuis Edge/Chrome sur ordinateur.
+
 ## Lancer sur l’ordinateur
 
 Prérequis : Node.js 20 ou plus récent.
