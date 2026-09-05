@@ -51,3 +51,21 @@ test("les quatre lieux proches de la liste Google sont prêts au premier lanceme
   assert.deepEqual(starters.map((spot) => spot.catalogId), ["vluchtenburg", "le-rozel", "siouville", "sciotot"]);
   assert.ok(starters.every((spot) => spot.enabled && !spot.needsCoordinates));
 });
+
+test("les photos de spots sont réelles, locales et créditées", () => {
+  const spotsWithPhotos = SPOT_CATALOG.filter((spot) => spot.photo);
+  assert.ok(spotsWithPhotos.length > 0);
+  for (const spot of spotsWithPhotos) {
+    assert.match(spot.photo.src, /^\.\/assets\/spots\/[a-z0-9-]+\.jpg$/);
+    assert.match(spot.photo.sourceUrl, /^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+    assert.ok(spot.photo.alt && spot.photo.credit && spot.photo.license);
+  }
+  assert.ok(SPOT_CATALOG.some((spot) => !spot.photo), "un spot sans photo doit rester autorisé");
+});
+
+test("les webcams ne sont proposées que lorsqu’une adresse vérifiée existe", () => {
+  for (const spot of SPOT_CATALOG.filter((entry) => entry.webcamUrl)) {
+    assert.doesNotThrow(() => new URL(spot.webcamUrl));
+    assert.ok(spot.webcamLabel);
+  }
+});

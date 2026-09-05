@@ -1,7 +1,7 @@
 import { backgroundNotification, evaluateStateForecast } from "./forecast.js";
 import { readWorkerValue, writeWorkerValue } from "./worker-store.js";
 
-const CACHE_NAME = "surf-radar-shell-v8";
+const CACHE_NAME = "surf-radar-shell-v20";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -12,6 +12,7 @@ const APP_SHELL = [
   "./catalog.js",
   "./share-target.js",
   "./forecast.js",
+  "./session-calendar.js",
   "./worker-store.js",
   "./vendor/leaflet/leaflet.js",
   "./vendor/leaflet/leaflet.css",
@@ -24,6 +25,11 @@ const APP_SHELL = [
   "./icon.svg",
   "./assets/design/header-ambient.png",
   "./assets/design/brand-mark.png",
+  "./assets/spots/wimereux.jpg",
+  "./assets/spots/wissant.jpg",
+  "./assets/spots/le-rozel.jpg",
+  "./assets/spots/siouville.jpg",
+  "./assets/spots/sciotot.jpg",
   "./assets/icon-192.png",
   "./assets/icon-512.png"
 ];
@@ -45,6 +51,23 @@ async function runBackgroundCheck() {
     tag: fresh.id,
     data: { url: "./#forecast" }
   });
+}
+
+async function sendDueSessionReminders() {
+  const reminders = await readWorkerValue("session-reminders") || [];
+  const due = reminders.filter((reminder) => !reminder.sent && reminder.remindAt <= Date.now());
+  if (!due.length) return;
+  for (const reminder of due) {
+    await self.registration.showNotification(`Session surf · ${reminder.spotName}`, {
+      body: "Ton créneau approche. Vérifie une dernière fois les conditions avant de partir.",
+      icon: "./assets/icon-192.png",
+      badge: "./assets/icon-192.png",
+      tag: `session-${reminder.id}`,
+      data: { url: reminder.routeUrl || "./#forecast" }
+    });
+    reminder.sent = true;
+  }
+  await writeWorkerValue("session-reminders", reminders);
 }
 
 self.addEventListener("install", (event) => {
@@ -75,11 +98,12 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("periodicsync", (event) => {
-  if (event.tag === "surf-radar-daily") event.waitUntil(runBackgroundCheck());
+  if (event.tag === "surf-radar-daily") event.waitUntil(Promise.all([runBackgroundCheck(), sendDueSessionReminders()]));
 });
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SURF_RADAR_CHECK_NOW") event.waitUntil(runBackgroundCheck());
+  if (event.data?.type === "SURF_RADAR_REMINDERS_CHECK") event.waitUntil(sendDueSessionReminders());
 });
 
 self.addEventListener("notificationclick", (event) => {

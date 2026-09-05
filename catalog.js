@@ -25,7 +25,15 @@ export const SPOT_CATALOG = [
     travelHours: 3,
     swellSector: "w",
     offshoreSector: "se",
+    address: "Plage de Wimereux, 62930 Wimereux, France",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=50.763552%2C1.605747",
+    photo: {
+      src: "./assets/spots/wimereux.jpg",
+      alt: "La plage de Wimereux",
+      credit: "Bateloupreaut",
+      license: "CC BY-SA 4.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Wimereux_beach.jpg"
+    },
     notes: "Spot avec école labellisée. Préréglage débutant prudent ; vérifier courants, marée et zone surveillée sur place.",
     sourceLabel: "Wimereux Surf School",
     sourceUrl: "https://www.wimereuxsurfschool.com/"
@@ -40,7 +48,15 @@ export const SPOT_CATALOG = [
     travelHours: 3.25,
     swellSector: "w",
     offshoreSector: "se",
+    address: "Plage de Wissant, 62179 Wissant, France",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=50.886111%2C1.663611",
+    photo: {
+      src: "./assets/spots/wissant.jpg",
+      alt: "La plage de Wissant et le cap Blanc-Nez",
+      credit: "Dguendel",
+      license: "CC BY 4.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Wissant,_beach_and_Cap_Blanc-Nez.JPG"
+    },
     notes: "Grande baie exposée et souvent ventée. Rester très prudent avec le shorebreak, les courants et les jours de vent fort.",
     sourceLabel: "École de Surf du Nord",
     sourceUrl: "https://www.ecolesurfnord.fr/"
@@ -134,7 +150,17 @@ export const SPOT_CATALOG = [
     hardMax: 1.45,
     swellSector: "w",
     offshoreSector: "e",
+    address: "Plage du Rozel, 50340 Le Rozel, France",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=49.4878388%2C-1.8436636",
+    photo: {
+      src: "./assets/spots/le-rozel.jpg",
+      alt: "La plage du Rozel",
+      credit: "Pradigue",
+      license: "CC BY-SA 4.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Plage_du_Rozel.jpg"
+    },
+    webcamLabel: "Webcam du site · Cotentin Vol Libre",
+    webcamUrl: "https://cotentinvolibre.com/sites/le-rozel/",
     notes: "Ton repère Google Maps au Rozel. Côte ouest exposée : privilégier une petite houle propre et observer les courants avant d’entrer.",
     sourceLabel: "Cotentin Tourisme",
     sourceUrl: "https://www.cotentin-tourisme-normandie.fr/ete-cotentin-plages/",
@@ -153,7 +179,17 @@ export const SPOT_CATALOG = [
     hardMax: 1.45,
     swellSector: "w",
     offshoreSector: "e",
+    address: "Plage de Siouville, 50340 Siouville-Hague, France",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=49.5709348%2C-1.8431215",
+    photo: {
+      src: "./assets/spots/siouville.jpg",
+      alt: "La plage de Siouville-Hague",
+      credit: "Ji-Elle",
+      license: "Domaine public",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:SiouvillePlage.JPG"
+    },
+    webcamLabel: "Webcam · Cotentin Surf Club",
+    webcamUrl: "https://www.cotentinsurfclub.com/meteo/webcam-2/",
     notes: "Ton repère Google Maps à Siouville. Côte ouest exposée à l’Atlantique, rouleaux réguliers et école de surf. La houle peut être plus puissante que dans le Nord.",
     sourceLabel: "Cotentin Tourisme",
     sourceUrl: "https://www.cotentin-tourisme-normandie.fr/ete-cotentin-plages/",
@@ -172,7 +208,17 @@ export const SPOT_CATALOG = [
     hardMax: 1.45,
     swellSector: "w",
     offshoreSector: "e",
+    address: "Plage de Sciotot, 50340 Les Pieux, France",
     googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=49.5051244%2C-1.8514162",
+    photo: {
+      src: "./assets/spots/sciotot.jpg",
+      alt: "La plage de Sciotot au crépuscule",
+      credit: "Daniel Jolivet",
+      license: "CC BY 2.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Les_Pieux_(Manche)_(27851574154).jpg"
+    },
+    webcamLabel: "Webcam Sciotot · GoSurf",
+    webcamUrl: "https://www.gosurf.fr/webcam/fr/172/La-Hague-Sciotot",
     notes: "Ton repère Google Maps aux Pieux, sur la plage de Sciotot. Vérifier la marée, les courants et la puissance réelle avant de se mettre à l’eau.",
     sourceLabel: "Cotentin Tourisme",
     sourceUrl: "https://www.cotentin-tourisme-normandie.fr/circuits/circuit-decouverte-de-la-hague-en-normandie/",

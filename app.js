@@ -10,11 +10,13 @@ import { catalogSpot, googleMapsDirectionsUrl, personalStarterSpots, SPOT_CATALO
 import { matchCatalogSpot, parseShareTarget } from "./share-target.js";
 import { fetchJson, forecastUrls } from "./forecast.js";
 import { writeWorkerValue } from "./worker-store.js";
+import { reminderForWindow, sessionCalendarFile, sessionCalendarFilename } from "./session-calendar.js";
 
 const STORAGE_KEY = "surf-radar-state-v1";
 const FORECAST_PREFIX = "surf-radar-forecast-";
 const KNOWN_WINDOWS_KEY = "surf-radar-known-windows";
 const ALERT_MODE_KEY = "surf-radar-alert-mode";
+const SESSION_REMINDERS_KEY = "surf-radar-session-reminders";
 const PERSONAL_SEED_VERSION = 2;
 const CACHE_MAX_AGE = 3 * 60 * 60 * 1000;
 const app = document.querySelector("#app");
@@ -22,6 +24,7 @@ const spotDialog = document.querySelector("#spot-dialog");
 const spotForm = document.querySelector("#spot-form");
 const catalogDialog = document.querySelector("#catalog-dialog");
 const catalogList = document.querySelector("#catalog-list");
+const googleImportDialog = document.querySelector("#google-import-dialog");
 const spotSearchInput = document.querySelector("#spot-search-input");
 const spotSearchButton = document.querySelector("#spot-search-button");
 const spotSearchResults = document.querySelector("#spot-search-results");
@@ -32,6 +35,8 @@ const refreshButton = document.querySelector("#refresh-button");
 const installButton = document.querySelector("#install-button");
 const dataStatus = document.querySelector("#data-status");
 const toastElement = document.querySelector("#toast");
+const spotDetailDialog = document.querySelector("#spot-detail-dialog");
+const spotDetailContent = document.querySelector("#spot-detail-content");
 
 let deferredInstallPrompt = null;
 let toastTimer = null;
@@ -42,6 +47,8 @@ let lastGeocodeAt = 0;
 let currentSearchResults = [];
 const geocodeCache = new Map();
 const runtime = new Map();
+let spotsOverviewMap = null;
+let spotsOverviewMapFrame = null;
 
 const initialState = {
   profile: { ...DEFAULT_PROFILE },
@@ -85,7 +92,10 @@ function loadState() {
       return {
         ...saved,
         profile: { ...DEFAULT_PROFILE, ...saved.profile },
-        spots,
+        spots: spots.map((spot) => ({
+          ...spot,
+          enabled: spot.enabled !== false && !spot.needsCoordinates
+        })),
         personalSeedVersion: PERSONAL_SEED_VERSION
       };
     }
@@ -139,6 +149,14 @@ function updateNavigation(route) {
 
 function render() {
   const route = currentRoute();
+  if (route !== "spots" && spotsOverviewMap) {
+    spotsOverviewMap.remove();
+    spotsOverviewMap = null;
+  }
+  if (route !== "spots" && spotsOverviewMapFrame) {
+    cancelAnimationFrame(spotsOverviewMapFrame);
+    spotsOverviewMapFrame = null;
+  }
   updateNavigation(route);
   if (route === "spots") renderSpots();
   else if (route === "profile") renderProfile();
@@ -173,7 +191,9 @@ function tideLabel(slot) {
 }
 
 function allWindows() {
+  const activeSpotIds = new Set(state.spots.filter((spot) => spot.enabled && !spot.needsCoordinates).map((spot) => spot.id));
   return [...runtime.values()]
+    .filter((entry) => activeSpotIds.has(entry.spot.id))
     .flatMap((entry) => entry.windows ?? [])
     .filter((window) => window.start.timestamp > Date.now() - 60 * 60 * 1000)
     .sort((a, b) => a.start.timestamp - b.start.timestamp || b.score - a.score);
@@ -214,72 +234,267 @@ function readableNearMissReason(slot) {
   return labels[weakest] || "conditions encore un peu irrégulières";
 }
 
-function windowCard(window) {
+function spotDetails(spot) {
+  const known = SPOT_CATALOG.find((candidate) => candidate.catalogId === spot.catalogId);
+  if (!known) return { ...spot, photo: null, webcamUrl: null, webcamLabel: null };
+  return {
+    ...known,
+    ...spot,
+    photo: known.photo || null,
+    webcamUrl: known.webcamUrl || null,
+    webcamLabel: known.webcamLabel || null,
+    address: spot.address || known.address
+  };
+}
+
+function closeDialog(dialog) {
+  if (!dialog?.open) return;
+  resetDialogDrag(dialog);
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    dialog.close();
+    return;
+  }
+  dialog.classList.add("is-closing");
+  window.setTimeout(() => {
+    dialog.close();
+    dialog.classList.remove("is-closing");
+  }, 190);
+}
+
+function resetDialogDrag(dialog) {
+  dialog.classList.remove("is-dragging", "is-returning", "is-swipe-closing");
+  dialog.style.removeProperty("--dialog-drag-y");
+}
+
+function bindSwipeToClose(dialog) {
+  let pointerId = null;
+  let startY = 0;
+  let startedAt = 0;
+  let offset = 0;
+  let settleTimer = null;
+
+  const settle = (shouldClose) => {
+    if (pointerId === null) return;
+    pointerId = null;
+    dialog.classList.remove("is-dragging");
+    window.clearTimeout(settleTimer);
+    if (shouldClose) {
+      dialog.classList.add("is-swipe-closing");
+      requestAnimationFrame(() => dialog.style.setProperty("--dialog-drag-y", "110vh"));
+      settleTimer = window.setTimeout(() => {
+        dialog.close();
+        resetDialogDrag(dialog);
+      }, 230);
+      return;
+    }
+    dialog.classList.add("is-returning");
+    dialog.style.setProperty("--dialog-drag-y", "0px");
+    settleTimer = window.setTimeout(() => resetDialogDrag(dialog), 190);
+  };
+
+  dialog.addEventListener("pointerdown", (event) => {
+    if (!dialog.open || window.innerWidth > 620 || event.button > 0) return;
+    if (event.target.closest("button, a, input, select, textarea, summary")) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientY - bounds.top > 112) return;
+    pointerId = event.pointerId;
+    startY = event.clientY;
+    startedAt = performance.now();
+    offset = 0;
+    dialog.classList.remove("is-returning", "is-swipe-closing");
+    dialog.classList.add("is-dragging");
+    dialog.setPointerCapture?.(pointerId);
+  });
+
+  dialog.addEventListener("pointermove", (event) => {
+    if (event.pointerId !== pointerId) return;
+    offset = Math.max(0, event.clientY - startY);
+    dialog.style.setProperty("--dialog-drag-y", `${offset}px`);
+    if (offset > 4) event.preventDefault();
+  });
+
+  dialog.addEventListener("pointerup", (event) => {
+    if (event.pointerId !== pointerId) return;
+    const elapsed = Math.max(performance.now() - startedAt, 1);
+    settle(offset >= 96 || (offset >= 36 && offset / elapsed >= .65));
+  });
+
+  dialog.addEventListener("pointercancel", (event) => {
+    if (event.pointerId === pointerId) settle(false);
+  });
+}
+
+function decorateWindow(window) {
+  return { ...window, spot: spotDetails(window.spot) };
+}
+
+function localDayKey(timestamp) {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function featuredWindows(windows = allWindows()) {
+  if (!windows.length) return [];
+  const firstDay = localDayKey(windows[0].start.timestamp);
+  const bestBySpot = new Map();
+  for (const window of windows.filter((candidate) => localDayKey(candidate.start.timestamp) === firstDay)) {
+    const previous = bestBySpot.get(window.spot.id);
+    if (!previous || window.score > previous.score) bestBySpot.set(window.spot.id, window);
+  }
+  return [...bestBySpot.values()]
+    .sort((a, b) => b.score - a.score || a.start.timestamp - b.start.timestamp)
+    .slice(0, 6)
+    .map(decorateWindow);
+}
+
+function windowById(id) {
+  const window = allWindows().find((candidate) => candidate.id === id);
+  return window ? decorateWindow(window) : null;
+}
+
+function sessionSlide(window, index, total) {
   const peak = window.peak;
   const swellHeight = peak.swellHeight ?? peak.waveHeight;
   const swellPeriod = peak.swellPeriod ?? peak.wavePeriod;
-  const swellDirection = peak.swellDirection ?? peak.waveDirection;
-  const confidenceClass = window.confidence.key === "high" ? "pill-good" : window.confidence.key === "medium" ? "pill-warning" : "";
-  const reason = window.positives[0] || "Créneau cohérent avec tes réglages";
+  const swellDirection = cardinalFromDegrees(peak.swellDirection ?? peak.waveDirection);
+  const tide = peak.tideTrend === "rising" ? "Montante" : peak.tideTrend === "falling" ? "Descendante" : "À vérifier";
   return `
-    <article class="window-card">
-      <div class="window-main">
-        <h3>${escapeHtml(window.spot.name)}</h3>
-        <div class="window-date">${escapeHtml(formatWindowTime(window))}</div>
-        <div class="condition-row">
-          ${window.spot.travelHours ? `<span>${escapeHtml(travelLabel(window.spot))}</span>` : ""}
-          <span>Houle ${Number(swellHeight).toFixed(1)} m · ${Number(swellPeriod).toFixed(0)} s · ${cardinalFromDegrees(swellDirection)}</span>
-          <span>Vent ${Number(peak.windSpeed ?? 0).toFixed(0)} km/h · ${cardinalFromDegrees(peak.windDirection)}</span>
-          <span>${escapeHtml(tideLabel(peak))}</span>
-        </div>
-        <p class="window-reason">${escapeHtml(reason)}.</p>
+    <article class="primary-session session-slide" data-session-slide aria-label="Option ${index + 1} sur ${total}">
+      <div class="session-heading">
+        <p class="session-date">${escapeHtml(relativeDay(window.start.timestamp))} · ${escapeHtml(routeTime.format(new Date(window.start.timestamp)))}–${escapeHtml(routeTime.format(new Date(window.end.timestamp + 60 * 60 * 1000)))}</p>
+        <span class="session-score">${window.score}/100</span>
       </div>
-      <div class="window-actions">
-        <span class="pill ${confidenceClass}">${escapeHtml(window.confidence.label)}</span>
-        ${routeButton(window.spot, "route-link")}
+      <h2>${escapeHtml(window.spot.name)}</h2>
+      ${window.spot.travelHours ? `<p class="travel-time"><i class="ph ph-clock" aria-hidden="true"></i>${escapeHtml(formatTravelHours(window.spot.travelHours))} aller</p>` : ""}
+      <p class="session-verdict"><i class="ph ph-waves" aria-hidden="true"></i>${escapeHtml(window.positives[0] || "Créneau cohérent avec tes réglages")}</p>
+      <div class="session-conditions">
+        <div><i class="ph ph-waves" aria-hidden="true"></i><strong>${Number(swellHeight).toFixed(1)} m</strong><span>Houle</span></div>
+        <div><i class="ph ph-timer" aria-hidden="true"></i><strong>${Number(swellPeriod).toFixed(0)} s</strong><span>Période</span></div>
+        <div><i class="ph ph-wind" aria-hidden="true"></i><strong>${Number(peak.windSpeed ?? 0).toFixed(0)} km/h</strong><span>Vent</span></div>
+        <div><i class="ph ph-compass" aria-hidden="true"></i><strong>${escapeHtml(swellDirection)}</strong><span>Direction</span></div>
+        <div><i class="ph ph-wave-sine" aria-hidden="true"></i><strong>${tide}</strong><span>Marée</span></div>
+      </div>
+      <div class="session-actions">
+        ${routeButton(window.spot, "button button-primary hero-route")}
+        <div class="session-utilities">
+          <button class="button button-ghost" data-action="add-reminder" data-window-id="${escapeHtml(window.id)}" type="button"><i class="ph ph-bell" aria-hidden="true"></i>Rappel</button>
+          <button class="button button-ghost" data-action="add-calendar" data-window-id="${escapeHtml(window.id)}" type="button"><i class="ph ph-calendar-plus" aria-hidden="true"></i>Agenda</button>
+        </div>
       </div>
     </article>`;
+}
+
+function sessionCarousel(windows) {
+  const count = windows.length;
+  return `
+    <div class="session-carousel-shell">
+      <div class="session-carousel" data-session-carousel>${windows.map((window, index) => sessionSlide(window, index, count)).join("")}</div>
+      ${count > 1 ? `
+        <div class="session-switcher" aria-label="Changer de spot recommandé">
+          <div class="carousel-dots">${windows.map((window, index) => `<button class="carousel-dot ${index === 0 ? "active" : ""}" data-action="show-session" data-index="${index}" type="button" aria-label="Voir ${escapeHtml(window.spot.name)}" ${index === 0 ? 'aria-current="true"' : ""}></button>`).join("")}</div>
+        </div>` : ""}
+    </div>`;
+}
+
+function initSessionCarousel() {
+  const carousel = document.querySelector("[data-session-carousel]");
+  if (!carousel) return;
+  const slides = [...carousel.querySelectorAll("[data-session-slide]")];
+  const dots = [...document.querySelectorAll(".carousel-dot")];
+  const update = () => {
+    const index = Math.max(0, Math.min(slides.length - 1, Math.round(carousel.scrollLeft / Math.max(1, carousel.clientWidth))));
+    dots.forEach((dot, dotIndex) => {
+      dot.classList.toggle("active", dotIndex === index);
+      if (dotIndex === index) dot.setAttribute("aria-current", "true");
+      else dot.removeAttribute("aria-current");
+    });
+  };
+  carousel.addEventListener("scroll", update, { passive: true });
+  update();
+}
+
+function scrollToSession(index) {
+  const carousel = document.querySelector("[data-session-carousel]");
+  const slides = carousel ? [...carousel.querySelectorAll("[data-session-slide]")] : [];
+  if (!carousel || !slides.length) return;
+  const destination = Math.max(0, Math.min(slides.length - 1, index));
+  carousel.scrollTo({ left: destination * carousel.clientWidth, behavior: "smooth" });
 }
 
 function nearMisses() {
-  return [...runtime.values()].map((entry) => {
+  const activeSpotIds = new Set(state.spots.filter((spot) => spot.enabled && !spot.needsCoordinates).map((spot) => spot.id));
+  return [...runtime.values()].filter((entry) => activeSpotIds.has(entry.spot.id)).map((entry) => {
     const candidates = (entry.scored ?? []).filter((slot) => slot.timestamp > Date.now() && slot.isDay && !slot.noGoReasons.length);
     if (!candidates.length) return null;
     const best = candidates.reduce((winner, slot) => slot.score > winner.score ? slot : winner, candidates[0]);
-    return { spot: entry.spot, slot: best };
-  }).filter(Boolean).sort((a, b) => b.slot.score - a.slot.score).slice(0, 4);
+    return { spot: spotDetails(entry.spot), slot: best };
+  }).filter(Boolean).sort((a, b) => b.slot.score - a.slot.score);
 }
 
-function nearMissCard({ spot, slot }) {
+function trendHero({ spot, slot }) {
   const swellHeight = slot.swellHeight ?? slot.waveHeight;
-  const mapsUrl = googleMapsDirectionsUrl(spot);
+  const swellPeriod = slot.swellPeriod ?? slot.wavePeriod;
+  const tide = slot.tideTrend === "rising" ? "Montante" : slot.tideTrend === "falling" ? "Descendante" : "À vérifier";
   return `
-    <article class="window-card near-miss-card">
-      <div class="window-main">
-        <h3>${escapeHtml(spot.name)}</h3>
-        <div class="window-date">${escapeHtml(relativeDay(slot.timestamp))} · ${escapeHtml(routeTime.format(new Date(slot.timestamp)))}</div>
-        <div class="condition-row">
-          ${spot.travelHours ? `<span>${escapeHtml(spot.travelHours)} h aller</span>` : ""}
-          ${Number.isFinite(Number(swellHeight)) ? `<span>Houle ${Number(swellHeight).toFixed(1)} m</span>` : ""}
-          ${Number.isFinite(Number(slot.windSpeed)) ? `<span>Vent ${Number(slot.windSpeed).toFixed(0)} km/h</span>` : ""}
+    <div class="session-carousel-shell">
+      <article class="primary-session trend-session">
+        <div class="session-heading"><p class="session-date">Meilleure tendance · ${escapeHtml(relativeDay(slot.timestamp))} à ${escapeHtml(routeTime.format(new Date(slot.timestamp)))}</p><span class="session-score trend-score">${slot.score}/100</span></div>
+        <h2>${escapeHtml(spot.name)}</h2>
+        ${spot.travelHours ? `<p class="travel-time"><i class="ph ph-clock" aria-hidden="true"></i>${escapeHtml(formatTravelHours(spot.travelHours))} aller</p>` : ""}
+        <p class="session-verdict"><i class="ph ph-binoculars" aria-hidden="true"></i>${escapeHtml(readableNearMissReason(slot))}</p>
+        <div class="session-conditions">
+          <div><i class="ph ph-waves" aria-hidden="true"></i><strong>${Number(swellHeight).toFixed(1)} m</strong><span>Houle</span></div>
+          <div><i class="ph ph-timer" aria-hidden="true"></i><strong>${Number(swellPeriod ?? 0).toFixed(0)} s</strong><span>Période</span></div>
+          <div><i class="ph ph-wind" aria-hidden="true"></i><strong>${Number(slot.windSpeed ?? 0).toFixed(0)} km/h</strong><span>Vent</span></div>
+          <div><i class="ph ph-compass" aria-hidden="true"></i><strong>${cardinalFromDegrees(slot.swellDirection ?? slot.waveDirection)}</strong><span>Direction</span></div>
+          <div><i class="ph ph-wave-sine" aria-hidden="true"></i><strong>${tide}</strong><span>Marée</span></div>
         </div>
-        <p class="window-reason">${escapeHtml(readableNearMissReason(slot))}.</p>
-      </div>
-      <div class="window-actions">
-        <span class="pill">À surveiller</span>
-        ${mapsUrl ? routeButton(spot, "route-link") : ""}
-      </div>
-    </article>`;
+        <div class="trend-actions">
+          ${routeButton(spot, "button button-primary hero-route")}
+          <button class="button button-ghost trend-detail" data-action="open-spot-detail" data-spot-id="${escapeHtml(spot.id)}" type="button"><i class="ph ph-info" aria-hidden="true"></i>Voir le détail</button>
+        </div>
+      </article>
+    </div>`;
 }
 
-function routeOnlyCard(spot) {
+function watchEntries(enabledSpots, featured, windows, misses, trendSpotId = "") {
+  const excludedIds = new Set([...featured.map((window) => window.spot.id), trendSpotId].filter(Boolean));
+  const missesBySpot = new Map(misses.map((entry) => [entry.spot.id, entry]));
+  return enabledSpots
+    .filter((spot) => !excludedIds.has(spot.id))
+    .map((savedSpot) => {
+      const spot = spotDetails(savedSpot);
+      const window = windows.find((candidate) => candidate.spot.id === spot.id);
+      const miss = missesBySpot.get(spot.id);
+      return { spot, window: window ? decorateWindow(window) : null, slot: window?.peak || miss?.slot || null };
+    })
+    .sort((a, b) => {
+      if (a.window && !b.window) return -1;
+      if (!a.window && b.window) return 1;
+      return Number(b.slot?.score || 0) - Number(a.slot?.score || 0);
+    });
+}
+
+function watchCard({ spot, window, slot }) {
+  const swellHeight = slot ? slot.swellHeight ?? slot.waveHeight : null;
+  const swellPeriod = slot ? slot.swellPeriod ?? slot.wavePeriod : null;
+  const date = window
+    ? `${relativeDay(window.start.timestamp)} · ${routeTime.format(new Date(window.start.timestamp))}`
+    : slot
+      ? `${relativeDay(slot.timestamp)} · ${routeTime.format(new Date(slot.timestamp))}`
+      : "Prévision en cours";
+  const quality = window ? `${window.score}/100 · ${window.confidence.label}` : slot ? `${slot.score}/100 · À surveiller` : "Mise à jour";
+  const reason = window ? window.positives[0] || "Créneau prometteur" : slot ? readableNearMissReason(slot) : "Lecture des conditions en cours";
+  const signal = Number.isFinite(Number(swellHeight))
+    ? `Houle ${Number(swellHeight).toFixed(1)} m${Number.isFinite(Number(swellPeriod)) ? ` · ${Number(swellPeriod).toFixed(0)} s` : ""}`
+    : "Houle en cours d’analyse";
   return `
-    <article class="window-card route-only-card">
-      <div class="window-main">
-        <h3>${escapeHtml(spot.name)}</h3>
-        <div class="window-date">Prévision en cours</div>
-        <p class="window-reason">Tu peux déjà préparer le trajet pendant la mise à jour des conditions.</p>
-      </div>
+    <article class="window-card watch-card">
+      <button class="watch-card-main" data-action="open-spot-detail" data-spot-id="${escapeHtml(spot.id)}" ${window ? `data-window-id="${escapeHtml(window.id)}"` : ""} type="button" aria-label="Voir le détail de ${escapeHtml(spot.name)}">
+        <div class="watch-heading"><h3>${escapeHtml(spot.name)}</h3><span class="watch-quality ${window ? "good" : ""}">${escapeHtml(quality)}</span></div>
+        <div class="window-date">${escapeHtml(date)} · ${escapeHtml(signal)}</div>
+        <p class="window-reason">${escapeHtml(reason)}.</p>
+      </button>
       <div class="window-actions">${routeButton(spot, "route-link")}</div>
     </article>`;
 }
@@ -287,68 +502,112 @@ function routeOnlyCard(spot) {
 function renderForecast() {
   const enabledSpots = state.spots.filter((spot) => spot.enabled && !spot.needsCoordinates);
   const windows = allWindows();
-  const next = windows[0];
+  const featured = featuredWindows(windows);
   const misses = nearMisses();
+  const trend = !featured.length && misses.length ? misses[0] : null;
   let hero;
 
   if (!enabledSpots.length) {
+    const hasSavedSpots = state.spots.length > 0;
     hero = `
       <section class="hero">
         <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
         <h1>Ta prochaine session</h1>
-        <p class="hero-intro">Choisis tes plages favorites. Le radar s’occupe ensuite de trouver le bon moment.</p>
+        <p class="hero-intro">${hasSavedSpots ? "Aucun spot n’est actuellement analysé. Réactive ceux que tu veux surveiller." : "Choisis tes plages favorites. Le radar s’occupe ensuite de trouver le bon moment."}</p>
         <div class="hero-actions">
-          <button class="button button-primary" data-action="open-catalog"><i class="ph ph-map-pin-plus" aria-hidden="true"></i>Choisir un spot connu</button>
+          ${hasSavedSpots ? `<a class="button button-primary" href="#spots"><i class="ph ph-toggle-right" aria-hidden="true"></i>Réactiver un spot</a>` : `<button class="button button-primary" data-action="open-catalog"><i class="ph ph-map-pin-plus" aria-hidden="true"></i>Choisir un spot connu</button>`}
           <button class="button button-ghost" data-action="add-spot">Rechercher sur la carte</button>
         </div>
       </section>`;
-  } else if (next) {
-    const peak = next.peak;
-    const swellHeight = peak.swellHeight ?? peak.waveHeight;
-    hero = `
-      <section class="hero">
-        <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
-        <h1>Ta prochaine session</h1>
-        <p class="hero-intro">Une recommandation simple pour ton niveau et les conditions.</p>
-        <div class="primary-session">
-          <p class="session-date">${escapeHtml(relativeDay(next.start.timestamp))} · ${escapeHtml(routeTime.format(new Date(next.start.timestamp)))}–${escapeHtml(routeTime.format(new Date(next.end.timestamp + 60 * 60 * 1000)))}</p>
-          <h2>${escapeHtml(next.spot.name)}</h2>
-          ${next.spot.travelHours ? `<p class="travel-time"><i class="ph ph-clock" aria-hidden="true"></i>${escapeHtml(formatTravelHours(next.spot.travelHours))} aller</p>` : ""}
-          <p class="session-verdict"><i class="ph ph-waves" aria-hidden="true"></i>Doux et propre pour ton niveau</p>
-          <div class="session-conditions">
-            <div><i class="ph ph-waves" aria-hidden="true"></i><strong>${Number(swellHeight).toFixed(1)} m</strong><span>Houle</span></div>
-            <div><i class="ph ph-wind" aria-hidden="true"></i><strong>${Number(peak.windSpeed ?? 0).toFixed(0)} km/h</strong><span>Vent</span></div>
-            <div><i class="ph ph-compass" aria-hidden="true"></i><strong>${cardinalFromDegrees(peak.swellDirection ?? peak.waveDirection)}</strong><span>Direction</span></div>
-            <div><i class="ph ph-wave-sine" aria-hidden="true"></i><strong>${peak.tideTrend === "rising" ? "Montante" : peak.tideTrend === "falling" ? "Descendante" : "À vérifier"}</strong><span>Niveau marin</span></div>
-          </div>
-          ${routeButton(next.spot, "button button-primary hero-route")}
-        </div>
-      </section>`;
   } else {
-    const loaded = runtime.size > 0;
+    const content = featured.length
+      ? sessionCarousel(featured)
+      : trend
+        ? trendHero(trend)
+        : `<div class="hero-actions"><button class="button button-primary" data-action="refresh"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Actualiser</button><a class="button button-ghost" href="#spots">Gérer mes spots</a></div>`;
     hero = `
       <section class="hero">
         <p class="eyebrow">${escapeHtml(headlineDate.format(new Date()))}</p>
         <h1>Ta prochaine session</h1>
-        <p class="hero-intro">${loaded ? "Pas encore de feu vert franc. Voici les meilleurs spots à surveiller." : "Lecture des conditions pour tes spots favoris…"}</p>
-        <div class="hero-actions"><button class="button button-primary" data-action="refresh"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Actualiser</button><a class="button button-ghost" href="#spots">Gérer mes spots</a></div>
+        <p class="hero-intro">${featured.length ? `Le meilleur créneau en premier${featured.length > 1 ? ` · ${featured.length} spots valent le détour ce jour-là` : ""}.` : trend ? "Pas encore de feu vert franc. Voici la meilleure tendance à surveiller." : "Lecture des conditions pour tes spots favoris…"}</p>
+        ${content}
       </section>`;
   }
 
-  const windowSpotIds = new Set(windows.map((window) => window.spot.id));
-  const additionalWindows = next ? windows.slice(1, 10) : windows.slice(0, 10);
-  const additionalMisses = misses.filter(({ spot }) => !windowSpotIds.has(spot.id)).slice(0, Math.max(0, 4 - additionalWindows.length));
-  const rows = [
-    ...additionalWindows.map((window) => `<div id="window-${escapeHtml(window.id)}">${windowCard(window)}</div>`),
-    ...additionalMisses.map(nearMissCard)
-  ];
-  const fallbackRows = !rows.length && !next ? misses.map(nearMissCard) : rows;
-  const visibleRows = fallbackRows.length ? fallbackRows : enabledSpots.slice(0, 4).map(routeOnlyCard);
-  const windowsHtml = visibleRows.length
-    ? `<div class="window-list">${visibleRows.join("")}</div>`
-    : `<section class="panel empty-state"><i class="ph ph-waves" aria-hidden="true"></i><h2>Aucun spot surveillé</h2><p>Choisis un spot connu ou recherche simplement une plage par son nom.</p></section>`;
+  const entries = watchEntries(enabledSpots, featured, windows, misses, trend?.spot.id);
+  const windowsHtml = entries.length
+    ? `<div class="window-list">${entries.map(watchCard).join("")}</div>`
+    : featured.length
+      ? `<p class="all-clear-note">Tous tes spots prometteurs de la journée sont proposés ci-dessus.</p>`
+      : `<section class="panel empty-state"><i class="ph ph-waves" aria-hidden="true"></i><h2>Aucun autre spot à surveiller</h2><p>Le radar continuera à analyser tes favoris.</p></section>`;
 
-  app.innerHTML = `<div class="view forecast-view">${hero}<div class="section-title"><div><h2>${next ? "Autres spots à surveiller" : "Spots à surveiller"}</h2><p>Les meilleures possibilités parmi tes favoris.</p></div></div>${windowsHtml}<a class="text-link all-spots-link" href="#spots">Voir tous les spots</a><p class="safety-note"><i class="ph ph-shield-check" aria-hidden="true"></i> Vérifie toujours les conditions sur place avant la mise à l’eau.</p></div>`;
+  app.innerHTML = `<div class="view forecast-view">${hero}<div class="section-title"><div><h2>Autres spots à surveiller</h2><p>Leur meilleure tendance à venir, sans surcharger l’écran.</p></div></div>${windowsHtml}<a class="text-link all-spots-link" href="#spots">Voir tous les spots</a><p class="safety-note"><i class="ph ph-shield-check" aria-hidden="true"></i> Vérifie toujours les conditions sur place avant la mise à l’eau.</p></div>`;
+  requestAnimationFrame(initSessionCarousel);
+}
+
+function bestFutureSlot(spotId) {
+  const entry = runtime.get(spotId);
+  const candidates = (entry?.scored || []).filter((slot) => slot.timestamp > Date.now() && slot.isDay && !slot.noGoReasons.length);
+  if (!candidates.length) return null;
+  return candidates.reduce((winner, slot) => slot.score > winner.score ? slot : winner, candidates[0]);
+}
+
+function detailMetric(icon, value, label) {
+  return `<div><i class="ph ${icon}" aria-hidden="true"></i><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function openSpotDetail(spotId, windowId = "") {
+  const savedSpot = state.spots.find((spot) => spot.id === spotId);
+  if (!savedSpot) return;
+  const spot = spotDetails(savedSpot);
+  const selectedWindow = windowId ? windowById(windowId) : allWindows().find((candidate) => candidate.spot.id === spotId);
+  const decoratedWindow = selectedWindow ? decorateWindow(selectedWindow) : null;
+  const slot = decoratedWindow?.peak || bestFutureSlot(spotId);
+  const swellHeight = slot ? slot.swellHeight ?? slot.waveHeight : null;
+  const swellPeriod = slot ? slot.swellPeriod ?? slot.wavePeriod : null;
+  const forecastLabel = decoratedWindow
+    ? formatWindowTime(decoratedWindow)
+    : slot
+      ? `Meilleure tendance ${relativeDay(slot.timestamp)} à ${routeTime.format(new Date(slot.timestamp))}`
+      : "Prévision en cours de chargement";
+  const quality = decoratedWindow ? `${decoratedWindow.score}/100 · ${decoratedWindow.confidence.label}` : slot ? `${slot.score}/100 · À surveiller` : "En attente";
+  const photo = spot.photo ? `
+    <figure class="spot-detail-photo">
+      <img src="${escapeHtml(spot.photo.src)}" alt="${escapeHtml(spot.photo.alt)}" loading="lazy">
+      <figcaption>Photo réelle · <a href="${escapeHtml(spot.photo.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(spot.photo.credit)} · ${escapeHtml(spot.photo.license)}</a></figcaption>
+    </figure>` : "";
+  const metrics = slot ? [
+    detailMetric("ph-waves", `${Number(swellHeight).toFixed(1)} m`, "Houle"),
+    detailMetric("ph-timer", `${Number(swellPeriod ?? 0).toFixed(0)} s`, "Période"),
+    detailMetric("ph-compass", cardinalFromDegrees(slot.swellDirection ?? slot.waveDirection), "Direction houle"),
+    detailMetric("ph-wind", `${Number(slot.windSpeed ?? 0).toFixed(0)} km/h`, "Vent"),
+    detailMetric("ph-navigation-arrow", cardinalFromDegrees(slot.windDirection), "Direction vent"),
+    detailMetric("ph-wave-sine", slot.tideTrend === "rising" ? "Montante" : slot.tideTrend === "falling" ? "Descendante" : "À vérifier", "Marée")
+  ].join("") : `<p class="detail-loading">Les prévisions détaillées seront disponibles après la prochaine actualisation.</p>`;
+
+  spotDetailContent.innerHTML = `
+    <div class="spot-detail-sheet ${spot.photo ? "has-photo" : "no-photo"}">
+      <span class="dialog-drag-handle" aria-hidden="true"></span>
+      <button class="icon-button dialog-close detail-close" data-action="close-spot-detail" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
+      ${photo}
+      <div class="spot-detail-body">
+        <p class="eyebrow">${escapeHtml(spot.region || "Spot favori")}</p>
+        <div class="detail-title-row"><h2 id="spot-detail-title">${escapeHtml(spot.name)}</h2><span class="detail-quality ${decoratedWindow ? "good" : ""}">${escapeHtml(quality)}</span></div>
+        <p class="detail-forecast-date">${escapeHtml(forecastLabel)}</p>
+        <div class="detail-metrics">${metrics}</div>
+        <div class="detail-practical">
+          <div><i class="ph ph-map-pin" aria-hidden="true"></i><span><strong>Adresse</strong>${escapeHtml(spot.address || [spot.name, spot.country].filter(Boolean).join(", "))}</span></div>
+          ${spot.travelHours ? `<div><i class="ph ph-car" aria-hidden="true"></i><span><strong>Depuis ton départ</strong>${escapeHtml(formatTravelHours(spot.travelHours))} aller</span></div>` : ""}
+        </div>
+        ${spot.notes ? `<p class="detail-note"><i class="ph ph-info" aria-hidden="true"></i><span>${escapeHtml(spot.notes)}</span></p>` : ""}
+        ${spot.webcamUrl ? `<a class="webcam-link" href="${escapeHtml(spot.webcamUrl)}" target="_blank" rel="noreferrer"><i class="ph ph-video-camera" aria-hidden="true"></i><span><strong>${escapeHtml(spot.webcamLabel || "Voir la webcam")}</strong><small>Vérifier les conditions en direct</small></span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></a>` : ""}
+        <div class="detail-actions">
+          ${routeButton(spot, "button button-primary detail-route")}
+          ${decoratedWindow ? `<button class="button button-ghost" data-action="add-reminder" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-bell" aria-hidden="true"></i>Rappel</button><button class="button button-ghost" data-action="add-calendar" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-calendar-plus" aria-hidden="true"></i>Agenda</button>` : ""}
+        </div>
+      </div>
+    </div>`;
+  spotDetailDialog.showModal();
 }
 
 function directionLabel(key) {
@@ -357,10 +616,17 @@ function directionLabel(key) {
 
 function spotCard(spot) {
   const mapsUrl = googleMapsDirectionsUrl(spot);
+  const isActive = spot.enabled && !spot.needsCoordinates;
   return `
-    <article class="spot-card ${spot.needsCoordinates ? "needs-coordinates" : ""}">
+    <article class="spot-card ${spot.needsCoordinates ? "needs-coordinates" : ""} ${isActive ? "is-active" : "is-paused"}">
       <div class="spot-main">
-        <h3>${escapeHtml(spot.name)}</h3>
+        <div class="spot-card-heading">
+          <h3>${escapeHtml(spot.name)}</h3>
+          <label class="analysis-toggle ${spot.needsCoordinates ? "is-disabled" : ""}" title="${isActive ? `Mettre ${escapeHtml(spot.name)} en pause` : `Activer l’analyse de ${escapeHtml(spot.name)}`}">
+            <input type="checkbox" role="switch" data-action="toggle-spot-analysis" data-id="${escapeHtml(spot.id)}" aria-label="${isActive ? `Mettre ${escapeHtml(spot.name)} en pause` : `Activer l’analyse de ${escapeHtml(spot.name)}`}" ${isActive ? "checked" : ""} ${spot.needsCoordinates ? "disabled" : ""}>
+            <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
         <div class="spot-meta">
           ${spot.needsCoordinates ? `<span class="pill pill-warning">Lieu à retrouver</span>` : ""}
           ${spot.country ? `<span class="pill">${escapeHtml(spot.country)}</span>` : ""}
@@ -374,27 +640,95 @@ function spotCard(spot) {
         ${mapsUrl ? `<a class="button button-primary button-small" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer" aria-label="S’y rendre à ${escapeHtml(spot.name)} avec Google Maps">S’y rendre</a>` : ""}
         ${spot.sourceUrl ? `<a class="button button-ghost button-small" href="${escapeHtml(spot.sourceUrl)}" target="_blank" rel="noreferrer">Référence</a>` : ""}
         <button class="button button-ghost button-small" data-action="edit-spot" data-id="${escapeHtml(spot.id)}">${spot.needsCoordinates ? "Compléter" : "Régler"}</button>
-        <button class="button button-danger button-small" data-action="delete-spot" data-id="${escapeHtml(spot.id)}">Retirer</button>
       </div>
     </article>`;
 }
 
 function renderSpots() {
+  if (spotsOverviewMapFrame) {
+    cancelAnimationFrame(spotsOverviewMapFrame);
+    spotsOverviewMapFrame = null;
+  }
+  if (spotsOverviewMap) {
+    spotsOverviewMap.remove();
+    spotsOverviewMap = null;
+  }
   const unresolved = state.spots.filter((spot) => spot.needsCoordinates).length;
+  const mappedSpots = state.spots.filter((spot) => !spot.needsCoordinates && Number.isFinite(Number(spot.lat)) && Number.isFinite(Number(spot.lon)));
+  const activeSpots = state.spots.filter((spot) => spot.enabled && !spot.needsCoordinates);
+  const pausedSpots = state.spots.filter((spot) => !spot.enabled || spot.needsCoordinates);
+  const mappedActiveCount = mappedSpots.filter((spot) => spot.enabled).length;
+  const mappedPausedCount = mappedSpots.length - mappedActiveCount;
   app.innerHTML = `
     <div class="view">
-      <div class="page-head">
-        <div><p class="eyebrow">Ta carte personnelle</p><h1>Mes spots favoris</h1><p>Chaque plage a ses propres règles. Les valeurs de départ sont prudentes pour ton mini-malibu et peuvent être affinées après quelques sessions.</p></div>
-        <div class="toolbar"><button class="button button-primary" data-action="open-catalog">Spots connus</button><button class="button button-ghost" data-action="add-spot">Carte / recherche</button><button class="button button-ghost" data-action="import-takeout">Importer un export Google</button></div>
+      <div class="page-head spots-page-head">
+        <div><p class="eyebrow">Ta carte personnelle</p><h1>Mes spots favoris</h1><p>Visualise tous tes favoris, puis ajoute un spot par son nom, son adresse ou directement sur la carte.</p></div>
       </div>
-      <section class="panel google-share-panel">
-        <div><p class="eyebrow">Google Maps sur Android</p><h2>Un spot te plaît ? Partage-le à Surf Radar.</h2><p>Dans Google Maps : ouvre la plage, touche <strong>Partager</strong>, puis choisis <strong>Surf Radar</strong>. L’app reconnaît le nom ou te propose directement le lieu sur la carte — aucune coordonnée à saisir.</p></div>
-        <div class="google-share-status"><strong>4 spots de ta liste reconnus</strong><span>Vluchtenburg · Le Rozel · Sciotot · Siouville</span></div>
+      <section class="spots-overview" aria-labelledby="spots-map-title">
+        <div class="spots-map-head">
+          <div class="spots-map-copy"><p class="eyebrow">Vue d’ensemble</p><h2 id="spots-map-title">Tous tes spots</h2><p>${mappedSpots.length} repère${mappedSpots.length > 1 ? "s" : ""} · ${mappedActiveCount} analysé${mappedActiveCount > 1 ? "s" : ""} · ${mappedPausedCount} en pause</p><div class="map-legend" aria-label="Légende de la carte"><span><i class="map-legend-marker is-active" aria-hidden="true"></i>Analysé</span><span><i class="map-legend-marker is-paused" aria-hidden="true"></i>En pause</span></div></div>
+          <div class="spots-map-controls">
+            <button class="button button-primary button-small" data-action="add-spot" type="button"><i class="ph ph-plus" aria-hidden="true"></i>Ajouter</button>
+            <details class="android-help">
+              <summary aria-label="Comment ajouter un spot depuis Google Maps"><i class="ph ph-question" aria-hidden="true"></i></summary>
+              <div class="android-help-popover" role="note">
+                <p class="eyebrow">Google Maps sur Android</p>
+                <h3>Ajouter un spot en deux gestes</h3>
+                <p>Dans Google Maps, ouvre la plage, touche <strong>Partager</strong>, puis choisis <strong>Surf Radar</strong>. L’app retrouve le lieu sans te demander de coordonnées.</p>
+              </div>
+            </details>
+          </div>
+        </div>
+        <div id="spots-overview-map" class="spots-overview-map" role="application" aria-label="Carte de mes spots enregistrés"></div>
       </section>
       ${unresolved ? `<div class="callout"><strong>${unresolved} spot${unresolved > 1 ? "s" : ""} importé${unresolved > 1 ? "s" : ""} à retrouver.</strong> Appuie sur « Compléter », recherche simplement son nom, puis choisis le résultat sur la carte.</div>` : ""}
-      <div class="section-title"><div><h2>${state.spots.length} spot${state.spots.length > 1 ? "s" : ""}</h2><p>Catalogue, recherche cartographique ou import Google.</p></div><div class="toolbar"><button class="button button-ghost button-small" data-action="export-backup">Sauvegarder</button><button class="button button-ghost button-small" data-action="import-backup">Restaurer</button></div></div>
-      ${state.spots.length ? `<div class="spot-list">${state.spots.map(spotCard).join("")}</div>` : `<section class="panel empty-state"><i class="ph ph-map-pin" aria-hidden="true"></i><h2>Ta liste est encore vide</h2><p>Le plus simple : choisis une plage connue. Pour un autre lieu, tape son nom ou son adresse et sélectionne-le sur la carte.</p><div class="hero-actions"><button class="button button-primary" data-action="open-catalog">Voir les spots connus</button><button class="button button-ghost" data-action="add-spot">Rechercher un lieu</button></div><p class="secondary-help">Ta liste Google Maps reste importable quand tu le souhaites.</p></section>`}
+      <div class="section-title spots-section-title"><div><p class="eyebrow">Surveillance active</p><h2>Spots analysés</h2><p>${activeSpots.length} spot${activeSpots.length > 1 ? "s" : ""} utilisé${activeSpots.length > 1 ? "s" : ""} par le Radar et les alertes.</p></div><div class="toolbar"><button class="button button-ghost button-small" data-action="export-backup">Sauvegarder</button><button class="button button-ghost button-small" data-action="import-backup">Restaurer</button></div></div>
+      ${activeSpots.length ? `<div class="spot-list active-spot-list">${activeSpots.map(spotCard).join("")}</div>` : state.spots.length ? `<section class="panel empty-state compact-empty"><i class="ph ph-radar" aria-hidden="true"></i><h2>Aucun spot analysé</h2><p>Réactive un spot dans la section ci-dessous pour le faire revenir dans le Radar et les alertes.</p></section>` : `<section class="panel empty-state"><i class="ph ph-map-pin" aria-hidden="true"></i><h2>Ta liste est encore vide</h2><p>Utilise « Ajouter » sur la carte pour rechercher un spot ou placer précisément ton repère.</p></section>`}
+      ${pausedSpots.length ? `<section class="paused-spots-section" aria-labelledby="paused-spots-title"><div class="section-title spots-section-title"><div><p class="eyebrow">Toujours enregistrés</p><h2 id="paused-spots-title">Spots en pause</h2><p>Ils restent sur ta carte et conservent leurs réglages. Réactive-les quand tu veux.</p></div><span class="paused-count">${pausedSpots.length}</span></div><div class="spot-list paused-spot-list">${pausedSpots.map(spotCard).join("")}</div></section>` : ""}
     </div>`;
+  spotsOverviewMapFrame = requestAnimationFrame(() => {
+    spotsOverviewMapFrame = null;
+    initSpotsOverviewMap(mappedSpots);
+  });
+}
+
+function initSpotsOverviewMap(spots) {
+  const container = document.querySelector("#spots-overview-map");
+  if (!container) return;
+  if (spotsOverviewMap || container._leaflet_id) return;
+  if (!window.L) {
+    container.innerHTML = '<p class="map-fallback">La carte n’a pas pu se charger. Tes spots restent disponibles dans la liste ci-dessous.</p>';
+    return;
+  }
+  spotsOverviewMap = window.L.map(container, { zoomControl: true, scrollWheelZoom: false });
+  window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(spotsOverviewMap);
+
+  const bounds = [];
+  for (const savedSpot of spots) {
+    const spot = spotDetails(savedSpot);
+    const isActive = spot.enabled && !spot.needsCoordinates;
+    const point = [Number(spot.lat), Number(spot.lon)];
+    const mapsUrl = googleMapsDirectionsUrl(spot);
+    const practical = [spot.country, spot.travelHours ? `${formatTravelHours(spot.travelHours)} aller` : ""].filter(Boolean).join(" · ");
+    const popup = `<div class="overview-popup"><strong>${escapeHtml(spot.name)}</strong>${practical ? `<span>${escapeHtml(practical)}</span>` : ""}${mapsUrl ? `<a href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer">Itinéraire Google Maps</a>` : ""}</div>`;
+    const markerIcon = window.L.divIcon({
+      className: "overview-marker-shell",
+      html: `<i class="overview-marker ${isActive ? "is-active" : "is-paused"}" aria-hidden="true"></i>`,
+      iconSize: [30, 49],
+      iconAnchor: [15, 49],
+      popupAnchor: [0, -43]
+    });
+    window.L.marker(point, { icon: markerIcon, title: `${spot.name} · ${isActive ? "analysé" : "en pause"}` }).addTo(spotsOverviewMap).bindPopup(popup);
+    bounds.push(point);
+  }
+
+  if (bounds.length > 1) spotsOverviewMap.fitBounds(bounds, { padding: [34, 34], maxZoom: 8 });
+  else if (bounds.length === 1) spotsOverviewMap.setView(bounds[0], 10);
+  else spotsOverviewMap.setView([state.profile.homeLat, state.profile.homeLon], 5);
+  setTimeout(() => spotsOverviewMap?.invalidateSize(), 80);
 }
 
 function renderProfile() {
@@ -425,7 +759,7 @@ function renderAbout() {
   app.innerHTML = `
     <div class="view">
       <div class="page-head"><div><p class="eyebrow">Transparence</p><h1>Comment lire le radar</h1><p>Le score décrit l’adéquation avec tes préférences. Il ne certifie jamais la sécurité d’une mise à l’eau.</p></div></div>
-      <section class="panel"><h2>Ajouter depuis Google Maps</h2><p>Sur Android, le plus simple est d’installer Surf Radar puis, depuis la fiche d’une plage dans Google Maps, de choisir <strong>Partager → Surf Radar</strong>. Pour reprendre une liste complète, utilise <a href="https://takeout.google.com/" target="_blank" rel="noreferrer">Google Takeout</a>, exporte <strong>Saved / Enregistrés</strong>, décompresse l’archive puis choisis le CSV avec « Importer un export Google ».</p><p>Google ne fournit pas d’API publique de synchronisation continue des listes enregistrées. Le partage ponctuel et l’export gardent l’application gratuite et évitent de lui donner accès à ton compte.</p></section>
+      <section class="panel"><h2>Ajouter depuis Google Maps</h2><p>Sur Android, le plus simple est d’installer Surf Radar puis, depuis la fiche d’une plage dans Google Maps, de choisir <strong>Partager → Surf Radar</strong>. Pour reprendre une liste complète, utilise <a href="https://takeout.google.com/" target="_blank" rel="noreferrer">Google Takeout</a>, exporte <strong>Saved / Enregistrés</strong>, décompresse l’archive puis choisis le CSV avec « Importer ma liste Google Maps ».</p><p>Google ne fournit pas d’API publique de synchronisation continue des listes enregistrées. Le partage ponctuel et l’export gardent l’application gratuite et évitent de lui donner accès à ton compte.</p></section>
       <section class="panel"><h2>Pourquoi la taille au large n’est pas la taille au bord</h2><p>La pente de la plage, les bancs de sable, l’angle d’arrivée et la période transforment fortement une houle. Une houle longue peut produire des séries bien plus puissantes que sa hauteur seule ne le suggère. Le radar apprend donc spot par spot et plafonne le score lorsqu’une longue période accompagne une houle déjà solide.</p><div class="callout"><strong>Avant de partir :</strong> regarde la vigilance vagues-submersion, la marée locale et une webcam si elle existe. Sur place, observe les courants et demande conseil aux sauveteurs ou aux locaux.</div></section>
       <section class="panel"><h2>Données et coût</h2><p>Le projet est conçu pour rester à 0 € : Open-Meteo, OpenStreetMap, stockage local et hébergement statique gratuit. Aucun contenu Surfline n’est aspiré.</p><div class="source-list"><a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank" rel="noreferrer">Open-Meteo Marine — houle, période, direction et niveau marin</a><a href="https://open-meteo.com/en/docs" target="_blank" rel="noreferrer">Open-Meteo Forecast — vent et lumière du jour</a><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap — carte et données géographiques</a><a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noreferrer">Nominatim — recherche de lieux à la demande</a><a href="https://vigilance.meteofrance.fr/" target="_blank" rel="noreferrer">Vigilance Météo-France</a><a href="https://support.google.com/maps/answer/7280933" target="_blank" rel="noreferrer">Aide Google — exporter les listes enregistrées</a></div></section>
       <section class="panel"><h2>Vie privée</h2><p>Tes spots et ton profil sont conservés dans le stockage local du navigateur. Seuls les mots saisis — ou le nom d’un lieu que tu partages volontairement depuis Google Maps — sont envoyés à Nominatim pour retrouver la plage. Aucun accès à ton compte Google n’est demandé. Utilise « Sauvegarder » dans Mes spots pour conserver une copie JSON avant de vider les données du navigateur.</p></section>
@@ -452,12 +786,13 @@ function openCatalogDialog() {
   catalogDialog.showModal();
 }
 
-function setSpotLocation({ lat, lon, name = "", country = "" }, { move = true, overwriteName = false } = {}) {
+function setSpotLocation({ lat, lon, name = "", country = "", address = "" }, { move = true, overwriteName = false } = {}) {
   const latitude = Number(lat);
   const longitude = Number(lon);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
   spotForm.elements.lat.value = latitude.toFixed(7);
   spotForm.elements.lon.value = longitude.toFixed(7);
+  if (address) spotForm.elements.address.value = address;
   if (name && (overwriteName || !spotForm.elements.name.value.trim())) spotForm.elements.name.value = name;
   if (country && !spotForm.elements.country.value.trim()) spotForm.elements.country.value = country;
   spotLocationStatus.textContent = `Lieu positionné${name ? ` : ${name}` : ""}. Tu peux enregistrer.`;
@@ -575,6 +910,10 @@ function openSpotDialog(id = null, draft = null) {
   spotLocationStatus.classList.remove("selected");
   document.querySelector("#spot-dialog-title").textContent = id ? "Régler le spot" : draft ? "Ajouter depuis Google Maps" : "Ajouter un spot";
   const spot = id ? state.spots.find((item) => item.id === id) : null;
+  const deleteZone = document.querySelector("#delete-spot-zone");
+  const deleteButton = deleteZone?.querySelector('[data-action="delete-spot"]');
+  deleteZone?.classList.toggle("hidden", !spot);
+  if (deleteButton) deleteButton.dataset.id = spot?.id || "";
   const values = spot || draft;
   if (values) {
     Object.entries(values).forEach(([key, value]) => {
@@ -601,6 +940,7 @@ spotForm.addEventListener("submit", (event) => {
     lat,
     lon,
     country: String(form.get("country") || "").trim(),
+    address: String(form.get("address") || existing?.address || "").trim(),
     travelHours: form.get("travelHours") ? Number(form.get("travelHours")) : null,
     googleMapsUrl: String(form.get("googleMapsUrl") || existing?.googleMapsUrl || (Number.isFinite(lat) && Number.isFinite(lon) ? `https://www.google.com/maps/search/?api=1&query=${lat}%2C${lon}` : "")),
     sweetMin: Number(form.get("sweetMin")),
@@ -611,7 +951,7 @@ spotForm.addEventListener("submit", (event) => {
     offshoreSector: String(form.get("offshoreSector")),
     tidePreference: String(form.get("tidePreference")),
     notes: String(form.get("notes") || "").trim(),
-    enabled: true,
+    enabled: existing ? existing.enabled !== false : true,
     needsCoordinates: false,
     source: String(form.get("source") || existing?.source || "Recherche OpenStreetMap")
   };
@@ -634,10 +974,21 @@ document.addEventListener("click", async (event) => {
   if (!target) return;
   const { action, id } = target.dataset;
   if (action === "add-spot") openSpotDialog();
-  if (action === "close-spot" && spotDialog.open) spotDialog.close();
+  if (action === "close-spot" && spotDialog.open) closeDialog(spotDialog);
+  if (action === "open-spot-detail") openSpotDetail(target.dataset.spotId, target.dataset.windowId);
+  if (action === "close-spot-detail" && spotDetailDialog.open) closeDialog(spotDetailDialog);
+  if (action === "show-session") scrollToSession(Number(target.dataset.index));
+  if (action === "add-calendar") {
+    const selectedWindow = windowById(target.dataset.windowId);
+    if (selectedWindow) addSessionToCalendar(selectedWindow);
+  }
+  if (action === "add-reminder") {
+    const selectedWindow = windowById(target.dataset.windowId);
+    if (selectedWindow) await addSessionReminder(selectedWindow);
+  }
   if (action === "edit-spot") openSpotDialog(id);
   if (action === "open-catalog") openCatalogDialog();
-  if (action === "close-catalog") catalogDialog.close();
+  if (action === "close-catalog") closeDialog(catalogDialog);
   if (action === "add-catalog-spot") {
     const spot = catalogSpot(id);
     if (!spot || state.spots.some((item) => item.catalogId === id)) return;
@@ -655,26 +1006,65 @@ document.addEventListener("click", async (event) => {
         lat: result.lat,
         lon: result.lon,
         name: searchResultName(result),
-        country: result.address?.country || ""
+        country: result.address?.country || "",
+        address: result.display_name || ""
       }, { overwriteName: true });
       spotSearchResults.innerHTML = "";
     }
   }
-  if (action === "import-takeout") takeoutInput.click();
+  if (action === "open-google-import") {
+    if (spotDialog.open) spotDialog.close();
+    googleImportDialog.showModal();
+  }
+  if (action === "close-google-import") closeDialog(googleImportDialog);
+  if (action === "choose-takeout-file") {
+    googleImportDialog.close();
+    takeoutInput.click();
+  }
   if (action === "refresh") refreshForecasts(true);
   if (action === "export-backup") downloadText("surf-radar-sauvegarde.json", exportBackup(state), "application/json");
   if (action === "import-backup") backupInput.click();
+  if (action === "toggle-spot-analysis") {
+    const spot = state.spots.find((item) => item.id === id);
+    if (!spot || spot.needsCoordinates) return;
+    spot.enabled = target.checked;
+    if (!spot.enabled) runtime.delete(spot.id);
+    saveState();
+    render();
+    if (spot.enabled) {
+      toast(`${spot.name} est de nouveau analysé.`);
+      refreshForecasts(false, [spot]);
+    } else {
+      toast(`${spot.name} est en pause · aucune alerte ne sera envoyée.`);
+    }
+  }
   if (action === "delete-spot") {
     const spot = state.spots.find((item) => item.id === id);
-    if (spot && confirm(`Retirer ${spot.name} de Surf Radar ?`)) {
+    if (spot && confirm(`Supprimer définitivement ${spot.name} ? Ses réglages enregistrés seront perdus.`)) {
       state.spots = state.spots.filter((item) => item.id !== id);
       runtime.delete(id);
       localStorage.removeItem(`${FORECAST_PREFIX}${id}`);
       saveState();
+      if (spotDialog.open) spotDialog.close();
+      toast(`${spot.name} a été supprimé.`);
       render();
     }
   }
   if (action === "enable-daily-alerts") enableDailyAlerts();
+});
+
+[spotDialog, catalogDialog, googleImportDialog, spotDetailDialog].forEach((dialog) => {
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    const outside = event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom;
+    if (outside) closeDialog(dialog);
+  });
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeDialog(dialog);
+  });
+  bindSwipeToClose(dialog);
 });
 
 spotSearchButton.addEventListener("click", searchSpotLocation);
@@ -787,6 +1177,63 @@ function downloadText(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function readSessionReminders() {
+  try { return JSON.parse(localStorage.getItem(SESSION_REMINDERS_KEY)) || []; } catch { return []; }
+}
+
+async function saveSessionReminders(reminders) {
+  localStorage.setItem(SESSION_REMINDERS_KEY, JSON.stringify(reminders));
+  await writeWorkerValue("session-reminders", reminders).catch((error) => console.warn("Synchronisation du rappel indisponible", error));
+}
+
+function addSessionToCalendar(window) {
+  downloadText(sessionCalendarFilename(window), sessionCalendarFile(window), "text/calendar;charset=utf-8");
+  toast("Événement créé avec l’adresse, les conditions et deux alertes.", 4800);
+}
+
+async function addSessionReminder(session) {
+  const reminder = reminderForWindow(session);
+  if (!reminder) {
+    toast("Ce créneau est trop proche pour programmer un rappel utile.");
+    return;
+  }
+  if (!("Notification" in window)) {
+    downloadText(sessionCalendarFilename(session), sessionCalendarFile(session, { reminders: [1440] }), "text/calendar;charset=utf-8");
+    toast("Les notifications ne sont pas disponibles : un rappel agenda a été préparé.", 5200);
+    return;
+  }
+  const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    downloadText(sessionCalendarFilename(session), sessionCalendarFile(session, { reminders: [1440] }), "text/calendar;charset=utf-8");
+    toast("Notifications refusées : un rappel agenda a été préparé à la place.", 5200);
+    return;
+  }
+  const reminders = readSessionReminders().filter((item) => item.id !== reminder.id);
+  reminders.push(reminder);
+  await saveSessionReminders(reminders);
+  navigator.serviceWorker?.controller?.postMessage({ type: "SURF_RADAR_REMINDERS_CHECK" });
+  toast(`Rappel enregistré ${reminder.label}.`, 4800);
+}
+
+async function notifyDueSessionReminders() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const reminders = readSessionReminders();
+  const due = reminders.filter((reminder) => !reminder.sent && reminder.remindAt <= Date.now());
+  if (!due.length) return;
+  const registration = await navigator.serviceWorker?.ready;
+  for (const reminder of due) {
+    await registration?.showNotification(`Session surf · ${reminder.spotName}`, {
+      body: "Ton créneau approche. Vérifie une dernière fois les conditions avant de partir.",
+      icon: "./assets/icon-192.png",
+      badge: "./assets/icon-192.png",
+      tag: `session-${reminder.id}`,
+      data: { url: reminder.routeUrl || "./#forecast" }
+    });
+    reminder.sent = true;
+  }
+  await saveSessionReminders(reminders);
+}
+
 async function enableDailyAlerts() {
   if (!("Notification" in window)) return toast("Notifications non prises en charge sur cet appareil.");
   const permission = await Notification.requestPermission();
@@ -834,6 +1281,7 @@ async function forecastForSpot(spot, force = false) {
 }
 
 function recomputeRuntime() {
+  runtime.clear();
   for (const spot of state.spots.filter((item) => item.enabled && !item.needsCoordinates)) {
     const cached = cachedForecast(spot);
     if (!cached?.marine || !cached?.weather) continue;
@@ -914,9 +1362,17 @@ window.addEventListener("appinstalled", () => {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js", { type: "module" })
-    .then(() => syncWorkerState())
+    .then(() => Promise.all([
+      syncWorkerState(),
+      writeWorkerValue("session-reminders", readSessionReminders()),
+      notifyDueSessionReminders()
+    ]))
     .catch((error) => console.warn("Service worker indisponible", error));
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") notifyDueSessionReminders();
+});
 
 fillSectorSelects();
 recomputeRuntime();

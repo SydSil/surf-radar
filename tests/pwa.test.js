@@ -29,4 +29,7 @@ test("le service worker module embarque le calcul et le stockage quotidien", asy
   assert.match(worker, /periodicsync/);
   assert.match(worker, /evaluateStateForecast/);
   assert.match(worker, /worker-store\.js/);
+  assert.match(worker, /SURF_RADAR_REMINDERS_CHECK/);
+  assert.match(worker, /session-calendar\.js/);
+  assert.match(worker, /assets\/spots\/siouville\.jpg/);
 });
