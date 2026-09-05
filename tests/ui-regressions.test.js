@@ -117,8 +117,13 @@ test("les modales ont une croix légère, un fond cliquable et un geste de ferme
   assert.match(app, /class="icon-button dialog-close detail-close"/);
   assert.match(styles, /\.dialog-close\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent/);
   assert.match(app, /function bindSwipeToClose\(dialog\)/);
+  assert.match(app, /event\.pointerType !== "touch"/);
+  assert.match(app, /\.dialog-drag-handle, \.dialog-head, \.spot-detail-photo, \.spot-detail-drag-region/);
+  assert.match(app, /dialog\.setPointerCapture\?\.\(pointerId\)/);
   assert.match(app, /offset >= 96/);
   assert.match(app, /const outside = event\.clientX < bounds\.left/);
   assert.match(app, /bindSwipeToClose\(dialog\)/);
   assert.match(styles, /\.dialog\.is-swipe-closing/);
+  assert.match(styles, /\.dialog-drag-handle\s*\{[^}]*width:\s*96px;[^}]*height:\s*44px/);
+  assert.match(styles, /\.dialog-head, \.spot-detail-photo, \.spot-detail-drag-region\s*\{[^}]*touch-action:\s*none/);
 });

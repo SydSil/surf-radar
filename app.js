@@ -275,7 +275,11 @@ function bindSwipeToClose(dialog) {
 
   const settle = (shouldClose) => {
     if (pointerId === null) return;
+    const activePointerId = pointerId;
     pointerId = null;
+    try {
+      if (dialog.hasPointerCapture?.(activePointerId)) dialog.releasePointerCapture(activePointerId);
+    } catch {}
     dialog.classList.remove("is-dragging");
     window.clearTimeout(settleTimer);
     if (shouldClose) {
@@ -293,17 +297,21 @@ function bindSwipeToClose(dialog) {
   };
 
   dialog.addEventListener("pointerdown", (event) => {
-    if (!dialog.open || window.innerWidth > 620 || event.button > 0) return;
+    if (!dialog.open || window.innerWidth > 620 || (event.pointerType !== "touch" && event.button !== 0)) return;
     if (event.target.closest("button, a, input, select, textarea, summary")) return;
     const bounds = dialog.getBoundingClientRect();
-    if (event.clientY - bounds.top > 112) return;
+    const dragSurface = event.target.closest(".dialog-drag-handle, .dialog-head, .spot-detail-photo, .spot-detail-drag-region");
+    if (!dragSurface && event.clientY - bounds.top > 72) return;
     pointerId = event.pointerId;
     startY = event.clientY;
     startedAt = performance.now();
     offset = 0;
     dialog.classList.remove("is-returning", "is-swipe-closing");
     dialog.classList.add("is-dragging");
-    dialog.setPointerCapture?.(pointerId);
+    try {
+      dialog.setPointerCapture?.(pointerId);
+    } catch {}
+    event.preventDefault();
   });
 
   dialog.addEventListener("pointermove", (event) => {
@@ -591,9 +599,11 @@ function openSpotDetail(spotId, windowId = "") {
       <button class="icon-button dialog-close detail-close" data-action="close-spot-detail" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
       ${photo}
       <div class="spot-detail-body">
-        <p class="eyebrow">${escapeHtml(spot.region || "Spot favori")}</p>
-        <div class="detail-title-row"><h2 id="spot-detail-title">${escapeHtml(spot.name)}</h2><span class="detail-quality ${decoratedWindow ? "good" : ""}">${escapeHtml(quality)}</span></div>
-        <p class="detail-forecast-date">${escapeHtml(forecastLabel)}</p>
+        <div class="spot-detail-drag-region">
+          <p class="eyebrow">${escapeHtml(spot.region || "Spot favori")}</p>
+          <div class="detail-title-row"><h2 id="spot-detail-title">${escapeHtml(spot.name)}</h2><span class="detail-quality ${decoratedWindow ? "good" : ""}">${escapeHtml(quality)}</span></div>
+          <p class="detail-forecast-date">${escapeHtml(forecastLabel)}</p>
+        </div>
         <div class="detail-metrics">${metrics}</div>
         <div class="detail-practical">
           <div><i class="ph ph-map-pin" aria-hidden="true"></i><span><strong>Adresse</strong>${escapeHtml(spot.address || [spot.name, spot.country].filter(Boolean).join(", "))}</span></div>

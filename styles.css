@@ -495,10 +495,13 @@ a { color: inherit; }
   .dialog.is-closing { animation-name: sheet-out; animation-duration: 180ms; }
   .dialog form { padding: 22px 18px max(22px, env(safe-area-inset-bottom)); }
   .dialog-head h2 { font-size: 1.5rem; }
-  .dialog-head { padding-top: 8px; padding-right: 38px; touch-action: none; }
-  .dialog-drag-handle { position: absolute; z-index: 5; top: 8px; left: 50%; display: block; width: 38px; height: 4px; border-radius: 999px; background: #c9d2d1; transform: translateX(-50%); touch-action: none; }
+  .dialog-head, .spot-detail-photo, .spot-detail-drag-region { touch-action: none; }
+  .dialog-head { padding-top: 18px; padding-right: 38px; }
+  .dialog-drag-handle { position: absolute; z-index: 5; top: 0; left: 50%; display: block; width: 96px; height: 44px; background: transparent; transform: translateX(-50%); touch-action: none; cursor: grab; }
+  .dialog-drag-handle::after { content: ""; position: absolute; top: 8px; left: 50%; width: 38px; height: 4px; border-radius: 999px; background: #c9d2d1; transform: translateX(-50%); }
+  .dialog.is-dragging .dialog-drag-handle { cursor: grabbing; }
   .dialog-close { top: 17px; right: 9px; }
-  .spot-detail-sheet.has-photo .dialog-drag-handle { background: rgba(255, 255, 255, .88); box-shadow: 0 1px 6px rgba(7, 26, 47, .3); }
+  .spot-detail-sheet.has-photo .dialog-drag-handle::after { background: rgba(255, 255, 255, .88); box-shadow: 0 1px 6px rgba(7, 26, 47, .3); }
   .dialog-actions { margin-left: -18px; margin-right: -18px; margin-bottom: calc(-1 * max(22px, env(safe-area-inset-bottom))); padding: 14px 18px max(18px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
   .dialog-actions .button { flex: 1; }
   .spot-detail-dialog { max-height: 92vh; }

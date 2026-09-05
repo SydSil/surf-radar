@@ -1,7 +1,7 @@
 import { backgroundNotification, evaluateStateForecast } from "./forecast.js";
 import { readWorkerValue, writeWorkerValue } from "./worker-store.js";
 
-const CACHE_NAME = "surf-radar-shell-v20";
+const CACHE_NAME = "surf-radar-shell-v21";
 const APP_SHELL = [
   "./",
   "./index.html",

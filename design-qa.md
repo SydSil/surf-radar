@@ -163,4 +163,13 @@
 - `npm run build`: static build completed successfully.
 - `node --check app.js` and `git diff --check`: passed; only Windows line-ending notices were reported.
 
+## Mobile sheet swipe reliability correction
+
+- The visible 38 × 4 px drag handle previously doubled as the entire touch target, making it impractical to grab on a phone.
+- The handle now keeps the same discreet visual line but exposes a centered 96 × 44 px touch surface.
+- Pointer capture is guarded for mobile browser differences, and touch scrolling is disabled only on intentional drag surfaces: the handle, modal header, detail header and spot photo.
+- A real 288–290 px downward drag was exercised at the live 321 px mobile viewport on both the Add spot sheet and the spot-detail sheet; both dismissed successfully.
+- `npm test`: 50 tests passed, 0 failed.
+- `npm run build`, `node --check app.js` and `git diff --check`: passed.
+
 final result: passed
