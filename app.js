@@ -300,7 +300,7 @@ function bindSwipeToClose(dialog) {
     if (!dialog.open || window.innerWidth > 620 || (event.pointerType !== "touch" && event.button !== 0)) return;
     if (event.target.closest("button, a, input, select, textarea, summary")) return;
     const bounds = dialog.getBoundingClientRect();
-    const dragSurface = event.target.closest(".dialog-drag-handle, .dialog-head, .spot-detail-photo, .spot-detail-drag-region");
+    const dragSurface = event.target.closest(".dialog-drag-handle, .dialog-head, .spot-detail-chrome, .spot-detail-photo, .spot-detail-drag-region");
     if (!dragSurface && event.clientY - bounds.top > 72) return;
     pointerId = event.pointerId;
     startY = event.clientY;
@@ -324,7 +324,11 @@ function bindSwipeToClose(dialog) {
   dialog.addEventListener("pointerup", (event) => {
     if (event.pointerId !== pointerId) return;
     const elapsed = Math.max(performance.now() - startedAt, 1);
-    settle(offset >= 96 || (offset >= 36 && offset / elapsed >= .65));
+    const isSpotDetail = dialog.classList.contains("spot-detail-dialog");
+    const closeDistance = isSpotDetail ? 72 : 96;
+    const fastDistance = isSpotDetail ? 28 : 36;
+    const fastVelocity = isSpotDetail ? .5 : .65;
+    settle(offset >= closeDistance || (offset >= fastDistance && offset / elapsed >= fastVelocity));
   });
 
   dialog.addEventListener("pointercancel", (event) => {
@@ -595,25 +599,29 @@ function openSpotDetail(spotId, windowId = "") {
 
   spotDetailContent.innerHTML = `
     <div class="spot-detail-sheet ${spot.photo ? "has-photo" : "no-photo"}">
-      <span class="dialog-drag-handle" aria-hidden="true"></span>
-      <button class="icon-button dialog-close detail-close" data-action="close-spot-detail" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
-      ${photo}
-      <div class="spot-detail-body">
-        <div class="spot-detail-drag-region">
-          <p class="eyebrow">${escapeHtml(spot.region || "Spot favori")}</p>
-          <div class="detail-title-row"><h2 id="spot-detail-title">${escapeHtml(spot.name)}</h2><span class="detail-quality ${decoratedWindow ? "good" : ""}">${escapeHtml(quality)}</span></div>
-          <p class="detail-forecast-date">${escapeHtml(forecastLabel)}</p>
-        </div>
-        <div class="detail-metrics">${metrics}</div>
-        <div class="detail-practical">
-          <div><i class="ph ph-map-pin" aria-hidden="true"></i><span><strong>Adresse</strong>${escapeHtml(spot.address || [spot.name, spot.country].filter(Boolean).join(", "))}</span></div>
-          ${spot.travelHours ? `<div><i class="ph ph-car" aria-hidden="true"></i><span><strong>Depuis ton départ</strong>${escapeHtml(formatTravelHours(spot.travelHours))} aller</span></div>` : ""}
-        </div>
-        ${spot.notes ? `<p class="detail-note"><i class="ph ph-info" aria-hidden="true"></i><span>${escapeHtml(spot.notes)}</span></p>` : ""}
-        ${spot.webcamUrl ? `<a class="webcam-link" href="${escapeHtml(spot.webcamUrl)}" target="_blank" rel="noreferrer"><i class="ph ph-video-camera" aria-hidden="true"></i><span><strong>${escapeHtml(spot.webcamLabel || "Voir la webcam")}</strong><small>Vérifier les conditions en direct</small></span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></a>` : ""}
-        <div class="detail-actions">
-          ${routeButton(spot, "button button-primary detail-route")}
-          ${decoratedWindow ? `<button class="button button-ghost" data-action="add-reminder" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-bell" aria-hidden="true"></i>Rappel</button><button class="button button-ghost" data-action="add-calendar" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-calendar-plus" aria-hidden="true"></i>Agenda</button>` : ""}
+      <div class="spot-detail-chrome">
+        <span class="dialog-drag-handle" aria-hidden="true"></span>
+        <button class="icon-button dialog-close detail-close" data-action="close-spot-detail" aria-label="Fermer" type="button"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="spot-detail-scroll">
+        ${photo}
+        <div class="spot-detail-body">
+          <div class="spot-detail-drag-region">
+            <p class="eyebrow">${escapeHtml(spot.region || "Spot favori")}</p>
+            <div class="detail-title-row"><h2 id="spot-detail-title">${escapeHtml(spot.name)}</h2><span class="detail-quality ${decoratedWindow ? "good" : ""}">${escapeHtml(quality)}</span></div>
+            <p class="detail-forecast-date">${escapeHtml(forecastLabel)}</p>
+          </div>
+          <div class="detail-metrics">${metrics}</div>
+          <div class="detail-practical">
+            <div><i class="ph ph-map-pin" aria-hidden="true"></i><span><strong>Adresse</strong>${escapeHtml(spot.address || [spot.name, spot.country].filter(Boolean).join(", "))}</span></div>
+            ${spot.travelHours ? `<div><i class="ph ph-car" aria-hidden="true"></i><span><strong>Depuis ton départ</strong>${escapeHtml(formatTravelHours(spot.travelHours))} aller</span></div>` : ""}
+          </div>
+          ${spot.notes ? `<p class="detail-note"><i class="ph ph-info" aria-hidden="true"></i><span>${escapeHtml(spot.notes)}</span></p>` : ""}
+          ${spot.webcamUrl ? `<a class="webcam-link" href="${escapeHtml(spot.webcamUrl)}" target="_blank" rel="noreferrer"><i class="ph ph-video-camera" aria-hidden="true"></i><span><strong>${escapeHtml(spot.webcamLabel || "Voir la webcam")}</strong><small>Vérifier les conditions en direct</small></span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></a>` : ""}
+          <div class="detail-actions">
+            ${routeButton(spot, "button button-primary detail-route")}
+            ${decoratedWindow ? `<button class="button button-ghost" data-action="add-reminder" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-bell" aria-hidden="true"></i>Rappel</button><button class="button button-ghost" data-action="add-calendar" data-window-id="${escapeHtml(decoratedWindow.id)}" type="button"><i class="ph ph-calendar-plus" aria-hidden="true"></i>Agenda</button>` : ""}
+          </div>
         </div>
       </div>
     </div>`;

@@ -172,4 +172,14 @@
 - `npm test`: 50 tests passed, 0 failed.
 - `npm run build`, `node --check app.js` and `git diff --check`: passed.
 
+## Homepage spot-detail sheet correction
+
+- The issue was isolated to the longer spot-detail sheets opened from the Radar homepage. Their drag handle and close control lived inside the scrolling content, so both disappeared after the user read further down the sheet.
+- The detail sheet now separates a fixed 54 px dismissal chrome from its independently scrolling forecast content. The whole top chrome is a drag surface while the close button remains a labelled, keyboard-accessible fallback.
+- Photo and no-photo variants use different protective gradients so the discreet handle and close icon remain visible over either a real image or white content.
+- The swipe threshold is reduced only for homepage spot-detail sheets: 72 px for a deliberate drag, or 28 px for a sufficiently fast gesture. Other modals keep their existing thresholds and behavior.
+- Real downward drags were exercised at the live 321 px viewport after scrolling both a real-photo sheet and a no-photo sheet; each dismissed successfully. A backdrop click was also exercised successfully.
+- `npm test`: 50 tests passed, 0 failed.
+- `npm run build`, `node --check app.js` and `git diff --check`: passed.
+
 final result: passed

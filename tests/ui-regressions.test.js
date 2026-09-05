@@ -118,12 +118,15 @@ test("les modales ont une croix légère, un fond cliquable et un geste de ferme
   assert.match(styles, /\.dialog-close\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent/);
   assert.match(app, /function bindSwipeToClose\(dialog\)/);
   assert.match(app, /event\.pointerType !== "touch"/);
-  assert.match(app, /\.dialog-drag-handle, \.dialog-head, \.spot-detail-photo, \.spot-detail-drag-region/);
+  assert.match(app, /\.dialog-drag-handle, \.dialog-head, \.spot-detail-chrome, \.spot-detail-photo, \.spot-detail-drag-region/);
   assert.match(app, /dialog\.setPointerCapture\?\.\(pointerId\)/);
-  assert.match(app, /offset >= 96/);
+  assert.match(app, /const closeDistance = isSpotDetail \? 72 : 96/);
   assert.match(app, /const outside = event\.clientX < bounds\.left/);
   assert.match(app, /bindSwipeToClose\(dialog\)/);
   assert.match(styles, /\.dialog\.is-swipe-closing/);
   assert.match(styles, /\.dialog-drag-handle\s*\{[^}]*width:\s*96px;[^}]*height:\s*44px/);
-  assert.match(styles, /\.dialog-head, \.spot-detail-photo, \.spot-detail-drag-region\s*\{[^}]*touch-action:\s*none/);
+  assert.match(styles, /\.dialog-head, \.spot-detail-chrome, \.spot-detail-photo, \.spot-detail-drag-region\s*\{[^}]*touch-action:\s*none/);
+  assert.match(styles, /\.spot-detail-chrome\s*\{[^}]*position:\s*absolute;[^}]*height:\s*54px;[^}]*touch-action:\s*none/);
+  assert.match(styles, /\.spot-detail-scroll\s*\{[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior-y:\s*contain/);
+  assert.match(styles, /\.spot-detail-sheet\.has-photo \.spot-detail-chrome\s*\{[^}]*linear-gradient/);
 });
